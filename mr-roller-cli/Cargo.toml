@@ -1,0 +1,11 @@
+[package]
+name = "mr-roller-cli"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mr-roller = { path = "../mr-roller" }
+uuid = { version = "1.4.1", features = ["v4"] }
+

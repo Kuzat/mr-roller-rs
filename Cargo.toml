@@ -1,0 +1,11 @@
+[package]
+name = "mr-roller-rs"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = [
+    "mr-roller",
+    "mr-roller-cli",
+    # "mr-roller-discord",
+]
