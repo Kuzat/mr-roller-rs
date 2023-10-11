@@ -10,12 +10,12 @@ use mr_roller::game::{
 fn main() {
     println!("Hello, world!");
 
-    let state = MrRollerState::HashState(HashMap::new());
+    let state = MrRollerState::LocalState(HashMap::new());
     let mut game = MrRollerGame::new(state);
 
     game.add_player(Player {
         id: PlayerId(0),
-        inventory: Inventory::local_inventory(),
+        inventory: Inventory::hash_inventory(),
     })
     .unwrap();
 
