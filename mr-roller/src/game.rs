@@ -1,11 +1,16 @@
-use crate::{errors::MrRollerError, output::MrRollerOutput};
+use crate::{
+    errors::MrRollerError,
+    output::{self, MrRollerOutput},
+};
 
 use self::{
-    item::ItemId,
+    inventory::Inventory,
+    item::{dice::basic_dice::BasicDice, Item},
     player::{Player, PlayerId},
     state::MrRollerState,
 };
 
+pub mod inventory;
 pub mod item;
 pub mod player;
 pub mod state;
@@ -20,19 +25,10 @@ impl MrRollerGame {
         MrRollerGame { state }
     }
 
-    pub fn add_player(&mut self, player: Player) -> Result<(), MrRollerError> {
-        // Add the player to the game state (Which most likely is a database or internal map)
-        self.state.add_player(player)
-    }
-
-    pub fn get_player(&self, player_id: PlayerId) -> Result<&Player, MrRollerError> {
-        // Get the player from the game state (Which most likely is a database or internal map)
-        self.state.get_player(player_id)
-    }
-
-    pub fn get_player_mut(&mut self, player_id: PlayerId) -> Result<&mut Player, MrRollerError> {
-        // Get the player from the game state (Which most likely is a database or internal map)
-        self.state.get_player_mut(player_id)
+    fn new_user_inventory(&self) -> Inventory {
+        match self.state {
+            MrRollerState::LocalState(_) => Inventory::local_inventory(),
+        }
     }
 
     // MVP features for first test.
@@ -49,6 +45,60 @@ impl MrRollerGame {
     // NO  Random events? /Event? /Event <event_id>
     // NO  /Help shows the help menu this should not be part of the game create but rather the
     //     implemntation create
+    pub fn start(&mut self, player_id: PlayerId) -> Result<MrRollerOutput, MrRollerError> {
+        // Need to check if the player is already in the game
+        match self.state.get_player(player_id) {
+            Ok(_) => Err(MrRollerError::PlayerAlreadyInGame),
+            Err(_) => {
+                let player = Player::new(player_id, self.new_user_inventory());
+                self.state.add_player(player)?;
 
+                // Fetch the player again from the state
+                let player = self.state.get_player_mut(player_id)?;
 
+                // Give the player the starter dice
+                player
+                    .inventory
+                    .add_item(Item::BasicDice(BasicDice::starter_dice()));
+
+                // Return the output
+                Ok(MrRollerOutput::Basic(output::Base {
+                    message: "You have been added to the game and given the starter dice."
+                        .to_string(),
+                    color: "green".to_string(),
+                }))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn test_start() {
+        let mut game = MrRollerGame::new(MrRollerState::LocalState(HashMap::new()));
+        let player_id = PlayerId::new(1);
+        let output = game.start(player_id).unwrap();
+        match output {
+            MrRollerOutput::Basic(output::Base { message, color }) => {
+                assert_eq!(
+                    message,
+                    "You have been added to the game and given the starter dice."
+                );
+                assert_eq!(color, "green");
+            }
+            _ => panic!("Output is not a basic output"),
+        }
+        let player = game.state.get_player(player_id).unwrap();
+        let items = player.inventory.list_items();
+        assert_eq!(items.len(), 1);
+        match items.get(0).unwrap() {
+            Item::BasicDice(dice) => assert_eq!(dice.name, "Starter Dice"),
+            _ => panic!("Item is not a dice"),
+        }
+    }
 }
