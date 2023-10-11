@@ -1,33 +1,28 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use crate::output::{self, MrRollerOutput};
-
-use self::dice::{BasicDice, Dice};
+use crate::output::{self};
 
 pub mod dice;
+pub mod tokens;
 
 #[derive(Debug)]
 pub enum Item {
     BasicDice(BasicDice),
+    RerollToken(RerollToken),
 }
 
-impl Item {
-    pub fn regular_dice() -> Item {
-        Item::BasicDice(BasicDice::regular_dice())
-    }
-}
 
 pub trait Usable {
     fn handle(&self) -> output::MrRollerOutput;
 }
 
-impl Usable for Item {
-    fn handle(&self) -> output::MrRollerOutput {
-        match self {
-            Item::BasicDice(dice) => MrRollerOutput::dice_roll(dice.roll()),
-        }
-    }
-}
+// impl Usable for Item {
+//     fn handle(&self) -> output::MrRollerOutput {
+//         match self {
+//             Item::BasicDice(dice) => MrRollerOutput::dice_roll(dice.roll()),
+//         }
+//     }
+// }
 
 //     CompletedUseable {
 //         item: Usable,
@@ -53,7 +48,7 @@ impl Debug for Inventory {
         match self {
             Inventory::LocalInventory(inventory) => {
                 write!(f, "LocalInventory({:?})", inventory.values())
-            },
+            }
         }
     }
 }
@@ -69,15 +64,13 @@ impl Inventory {
                 let id = uuid::Uuid::new_v4();
                 inventory.insert(id, item);
                 id
-            },
+            }
         }
     }
 
     pub fn get_item(&self, item_id: &ItemId) -> Option<&Item> {
         match self {
-            Inventory::LocalInventory(inventory) => {
-                inventory.get(item_id)
-            },
+            Inventory::LocalInventory(inventory) => inventory.get(item_id),
         }
     }
 }

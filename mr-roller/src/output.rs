@@ -1,13 +1,13 @@
-pub struct MrRollerOutput {
+pub enum MrRollerOutput {
+    Basic(Base),
+    DiceRoll(Base, DiceRoll),
+}
+
+pub struct Base {
     pub message: String,
     pub color: String,
     // pub player: Option<Player>,
 }
-impl MrRollerOutput {
-    pub(crate) fn dice_roll(roll: u32) -> MrRollerOutput {
-        MrRollerOutput {
-            message: format!("You rolled a {}", roll),
-            color: String::from("green"),
-        }
-    }
+pub struct DiceRoll {
+    pub roll: u32,
 }
