@@ -13,13 +13,14 @@ pub trait Usable {
     fn handle(&self) -> output::MrRollerOutput;
 }
 
-// impl Usable for Item {
-//     fn handle(&self) -> output::MrRollerOutput {
-//         match self {
-//             Item::BasicDice(dice) => MrRollerOutput::dice_roll(dice.roll()),
-//         }
-//     }
-// }
+impl Usable for Item {
+    fn handle(&self) -> output::MrRollerOutput {
+        match self {
+            Item::BasicDice(dice) => dice.handle(),
+            Item::RerollToken(token) => token.handle(),
+        }
+    }
+}
 
 //     CompletedUseable {
 //         item: Usable,

@@ -4,6 +4,7 @@ use std::fmt::Display;
 pub enum MrRollerError {
     PlayerNotFound,
     PlayerAlreadyInGame,
+    ItemNotFound,
 }
 
 impl Display for MrRollerError {
@@ -11,6 +12,7 @@ impl Display for MrRollerError {
         match self {
             MrRollerError::PlayerNotFound => write!(f, "Player not found"),
             MrRollerError::PlayerAlreadyInGame => write!(f, "Player already in game"),
+            MrRollerError::ItemNotFound => write!(f, "Item not found"),
         }
     }
 }

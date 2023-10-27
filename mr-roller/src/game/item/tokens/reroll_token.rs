@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::{game::item::Usable, output};
+
 #[derive(Debug)]
 pub struct RerollToken {
     pub name: String,
@@ -14,6 +16,15 @@ impl RerollToken {
             description: String::from("A token that allows you to reroll a dice"),
             amount: 1,
         }
+    }
+}
+
+impl Usable for RerollToken {
+    fn handle(&self) -> output::MrRollerOutput {
+        output::MrRollerOutput::Basic(output::Base {
+            message: "You have used the item.".to_string(),
+            color: "green".to_string(),
+        })
     }
 }
 
