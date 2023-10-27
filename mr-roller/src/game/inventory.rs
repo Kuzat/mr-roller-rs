@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use crate::errors::MrRollerError;
+
 use super::item::Item;
 
 pub type ItemId = uuid::Uuid;
@@ -34,9 +36,9 @@ impl Inventory {
         }
     }
 
-    pub fn get_item(&self, item_id: &ItemId) -> Option<&Item> {
+    pub fn get_item(&self, item_id: &ItemId) -> Result<&Item, MrRollerError> {
         match self {
-            Inventory::LocalInventory(inventory) => inventory.get(item_id),
+            Inventory::LocalInventory(inventory) => inventory.get(item_id).ok_or(MrRollerError::ItemNotFound),
         }
     }
 

@@ -4,8 +4,8 @@ use crate::{
 };
 
 use self::{
-    inventory::Inventory,
-    item::{dice::basic_dice::BasicDice, Item},
+    inventory::{Inventory, ItemId},
+    item::{dice::basic_dice::BasicDice, Item, Usable},
     player::{Player, PlayerId},
     state::MrRollerState,
 };
@@ -69,6 +69,21 @@ impl MrRollerGame {
                 }))
             }
         }
+    }
+
+    // YES /Use(handle) <item_id> Use a item from the inventory, this can also be a dice, and any other items
+    //      that have the useable trait. Should also autocomplete show all useable items in the invetory
+    //      sorted by most recent first
+    pub fn handle(
+        &mut self,
+        player_id: PlayerId,
+        item_id: ItemId,
+    ) -> Result<MrRollerOutput, MrRollerError> {
+        let player = self.state.get_player_mut(player_id)?;
+
+        let item = player.inventory.get_item(&item_id)?;
+
+        Ok(item.handle())
     }
 }
 
