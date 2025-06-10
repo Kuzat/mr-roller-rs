@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use mr_roller::game::{
-    item::{dice::BasicDice, Inventory, Item, Usable},
+    inventory::Inventory,
+    item::{dice::basic_dice::BasicDice, Item},
     player::{Player, PlayerId},
     state::MrRollerState,
     MrRollerGame,
@@ -10,26 +11,22 @@ use mr_roller::game::{
 fn main() {
     println!("Hello, world!");
 
-    let state = MrRollerState::LocalState(HashMap::new());
+    // Build initial game state with one player and a regular dice.
+    let mut state = MrRollerState::LocalState(HashMap::new());
+    let mut player = Player::new(PlayerId::new(0), Inventory::local_inventory());
+    let item_id = player
+        .inventory
+        .add_item(Item::BasicDice(BasicDice::regular_dice()));
+    state.add_player(player).unwrap();
+
     let mut game = MrRollerGame::new(state);
 
-    game.add_player(Player {
-        id: PlayerId(0),
-        inventory: Inventory::hash_inventory(),
-    })
-    .unwrap();
-
-    let player = game.get_player_mut(PlayerId(0)).unwrap();
-
-    println!("{:?}", player);
-
-    let item_id = player.inventory.add_item(Item::regular_dice());
-
-    println!("{:?}", player);
-
-    // Roll
-    match player.inventory.get_item(&item_id) {
-        None => println!("Item not found"),
-        Some(item) => println!("{}", item.handle().message),
+    // Use the dice through the game API.
+    match game.handle(PlayerId::new(0), item_id).unwrap() {
+        mr_roller::output::MrRollerOutput::Basic(msg) => println!("{}", msg.message),
+        mr_roller::output::MrRollerOutput::DiceRoll(base, roll) => {
+            println!("{}", base.message);
+            println!("Rolled {}", roll.roll);
+        }
     }
 }
