@@ -1,4 +1,4 @@
-use crate::output::{self};
+use crate::response::Response;
 
 pub mod dice;
 pub mod tokens;
@@ -9,12 +9,22 @@ pub enum Item {
     RerollToken(tokens::reroll_token::RerollToken),
 }
 
-pub trait Usable {
-    fn handle(&self) -> output::MrRollerOutput;
-}
+impl Item {
+    pub fn name(&self) -> &str {
+        match self {
+            Item::BasicDice(d) => &d.name,
+            Item::RerollToken(t) => &t.name,
+        }
+    }
 
-impl Usable for Item {
-    fn handle(&self) -> output::MrRollerOutput {
+    pub fn description(&self) -> &str {
+        match self {
+            Item::BasicDice(d) => &d.description,
+            Item::RerollToken(t) => &t.description,
+        }
+    }
+
+    pub fn handle(&self) -> Response {
         match self {
             Item::BasicDice(dice) => dice.handle(),
             Item::RerollToken(token) => token.handle(),

@@ -2,17 +2,14 @@ use std::fmt::Display;
 
 use rand::{thread_rng, Rng};
 
-use crate::{
-    game::item::Usable,
-    output::{self, MrRollerOutput},
-};
+use crate::response::Response;
 
 #[derive(Debug, Clone)]
 pub struct BasicDice {
     pub name: String,
     pub description: String,
-    min_roll: u32,
-    max_roll: u32,
+    pub min_roll: u32,
+    pub max_roll: u32,
 }
 
 impl BasicDice {
@@ -33,19 +30,10 @@ impl BasicDice {
             max_roll: 2,
         }
     }
-}
 
-impl Usable for BasicDice {
-    fn handle(&self) -> MrRollerOutput {
+    pub fn handle(&self) -> Response {
         let random_roll = thread_rng().gen_range(self.min_roll..=self.max_roll);
-
-        MrRollerOutput::DiceRoll(
-            output::Base {
-                message: format!("You rolled a {}", random_roll),
-                color: String::from("green"),
-            },
-            output::DiceRoll { roll: random_roll },
-        )
+        Response::dice_roll(format!("You rolled a {}!", random_roll), random_roll)
     }
 }
 
@@ -62,7 +50,6 @@ mod tests {
     #[test]
     fn test_basic_dice() {
         let dice = BasicDice::regular_dice();
-
         assert_eq!(dice.min_roll, 1);
         assert_eq!(dice.max_roll, 6);
     }
@@ -70,10 +57,19 @@ mod tests {
     #[test]
     fn test_display_basic_dice() {
         let dice = BasicDice::regular_dice();
-
         assert_eq!(
             format!("{}", dice),
             "Regular Dice: A regular dice with 6 sides"
         );
+    }
+
+    #[test]
+    fn test_handle_returns_dice_roll() {
+        let dice = BasicDice::starter_dice();
+        let resp = dice.handle();
+        assert_eq!(resp.kind, crate::response::ResponseKind::DiceRoll);
+        assert!(resp.data.is_some());
+        let roll = resp.data.unwrap()["roll"].as_u64().unwrap();
+        assert!(roll == 1 || roll == 2);
     }
 }

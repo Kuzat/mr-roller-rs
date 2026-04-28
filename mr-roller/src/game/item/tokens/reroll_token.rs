@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{game::item::Usable, output};
+use crate::response::Response;
 
 #[derive(Debug, Clone)]
 pub struct RerollToken {
@@ -17,14 +17,9 @@ impl RerollToken {
             amount: 1,
         }
     }
-}
 
-impl Usable for RerollToken {
-    fn handle(&self) -> output::MrRollerOutput {
-        output::MrRollerOutput::Basic(output::Base {
-            message: "You have used the item.".to_string(),
-            color: "green".to_string(),
-        })
+    pub fn handle(&self) -> Response {
+        Response::success("Reroll token used — re-rolling your last dice!")
     }
 }
 
@@ -47,17 +42,22 @@ mod tests {
     #[test]
     fn test_reroll_token() {
         let token = RerollToken::new();
-
         assert_eq!(token.amount, 1);
     }
 
     #[test]
     fn test_reroll_token_display() {
         let token = RerollToken::new();
-
         assert_eq!(
             format!("{}", token),
             "Reroll Token: A token that allows you to reroll a dice"
         );
+    }
+
+    #[test]
+    fn test_handle() {
+        let token = RerollToken::new();
+        let resp = token.handle();
+        assert_eq!(resp.kind, crate::response::ResponseKind::Success);
     }
 }
