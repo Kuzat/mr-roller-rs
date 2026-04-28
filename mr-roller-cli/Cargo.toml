@@ -7,5 +7,6 @@ edition = "2021"
 
 [dependencies]
 mr-roller = { path = "../mr-roller" }
+tokio = { version = "1", features = ["rt", "macros"] }
 uuid = { version = "1.4.1", features = ["v4"] }
 

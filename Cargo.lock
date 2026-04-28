@@ -715,6 +715,7 @@ name = "mr-roller-cli"
 version = "0.1.0"
 dependencies = [
  "mr-roller",
+ "tokio",
  "uuid",
 ]
 
