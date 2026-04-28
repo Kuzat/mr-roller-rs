@@ -11,6 +11,13 @@ pub trait GameItem: Debug + Clone + Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn handle(&self) -> Response;
+
+    /// Whether using this item consumes the player's daily roll allowance.
+    /// Dice consume the daily roll by default. Utility items like reroll tokens
+    /// can override this to bypass/reset cooldown behaviour.
+    fn consumes_daily_roll(&self) -> bool {
+        true
+    }
 }
 
 // ── define_items! macro — one line per item type ───────────────────────────
@@ -75,6 +82,13 @@ macro_rules! define_items {
             pub fn handle(&self) -> Response {
                 match self {
                     $(Item::$variant(item) => $crate::game::item::GameItem::handle(item)),+
+                }
+            }
+
+            /// Returns whether this item consumes the daily roll allowance.
+            pub fn consumes_daily_roll(&self) -> bool {
+                match self {
+                    $(Item::$variant(item) => $crate::game::item::GameItem::consumes_daily_roll(item)),+
                 }
             }
         }

@@ -11,6 +11,7 @@
 - [x] Phase 3: `define_items!` macro and `GameItem` trait
 - [x] Phase 4: New items — LuckyDice, CursedDice
 - [x] Phase 5: CLI rewrite against new API
+- [x] Cooldown system: one roll per day by default, configurable duration/reset, reroll token reset
 
 ## Library — Remaining
 - [ ] Add `serde` derives to items for database serialization

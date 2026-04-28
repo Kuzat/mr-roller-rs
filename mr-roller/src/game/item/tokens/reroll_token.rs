@@ -19,7 +19,11 @@ impl GameItem for RerollToken {
     }
 
     fn handle(&self) -> Response {
-        Response::success("Reroll token used — re-rolling your last dice!")
+        Response::success("Reroll token used — your roll cooldown has been reset.")
+    }
+
+    fn consumes_daily_roll(&self) -> bool {
+        false
     }
 }
 

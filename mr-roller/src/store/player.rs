@@ -25,6 +25,9 @@ pub trait PlayerStore: Send + Sync {
 
     /// Returns all players.
     async fn all(&self) -> Result<Vec<Player>, MrRollerError>;
+
+    /// Replaces an existing player's data. Errors if not found.
+    async fn update(&self, player: Player) -> Result<(), MrRollerError>;
 }
 
 /// In-memory player store backed by `HashMap` behind a `RwLock`.
@@ -74,6 +77,15 @@ impl PlayerStore for InMemoryPlayerStore {
 
     async fn all(&self) -> Result<Vec<Player>, MrRollerError> {
         Ok(self.players.read().await.values().cloned().collect())
+    }
+
+    async fn update(&self, player: Player) -> Result<(), MrRollerError> {
+        let mut players = self.players.write().await;
+        if !players.contains_key(&player.id) {
+            return Err(MrRollerError::PlayerNotFound);
+        }
+        players.insert(player.id, player);
+        Ok(())
     }
 }
 
@@ -136,9 +148,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_not_found() {
+    async fn test_update() {
         let store = InMemoryPlayerStore::new();
-        let err = store.remove(PlayerId::new(999)).await.unwrap_err();
+        store.insert(make_player(1)).await.unwrap();
+
+        let mut player = store.get(PlayerId::new(1)).await.unwrap();
+        player.xp = 500;
+        store.update(player).await.unwrap();
+
+        let updated = store.get(PlayerId::new(1)).await.unwrap();
+        assert_eq!(updated.xp, 500);
+    }
+
+    #[tokio::test]
+    async fn test_update_not_found() {
+        let store = InMemoryPlayerStore::new();
+        let err = store.update(make_player(999)).await.unwrap_err();
         assert!(matches!(err, MrRollerError::PlayerNotFound));
     }
 }

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::{
     command::Command,
+    cooldown::CooldownConfig,
     response::{Response, ResponseKind},
     store::{InventoryStore, LeaderboardStore, PlayerStore},
 };
@@ -16,20 +17,32 @@ pub struct Game {
     players: Arc<dyn PlayerStore>,
     inventory: Arc<dyn InventoryStore>,
     leaderboard: Arc<dyn LeaderboardStore>,
+    cooldown: CooldownConfig,
 }
 
 impl Game {
-    /// Create a new game wired to the provided stores. Use the in-memory
-    /// implementations for testing/CLI, or swap in database-backed ones later.
+    /// Create a new game wired to the provided stores with the default cooldown
+    /// config: 24 hours, reset at midnight UTC.
     pub fn new(
         players: Arc<dyn PlayerStore>,
         inventory: Arc<dyn InventoryStore>,
         leaderboard: Arc<dyn LeaderboardStore>,
     ) -> Self {
+        Self::with_cooldown(players, inventory, leaderboard, CooldownConfig::default())
+    }
+
+    /// Create a new game with an explicit cooldown config.
+    pub fn with_cooldown(
+        players: Arc<dyn PlayerStore>,
+        inventory: Arc<dyn InventoryStore>,
+        leaderboard: Arc<dyn LeaderboardStore>,
+        cooldown: CooldownConfig,
+    ) -> Self {
         Game {
             players,
             inventory,
             leaderboard,
+            cooldown,
         }
     }
 
@@ -41,6 +54,7 @@ impl Game {
             players: self.players.as_ref(),
             inventory: self.inventory.as_ref(),
             leaderboard: self.leaderboard.as_ref(),
+            cooldown: &self.cooldown,
         };
 
         match cmd.execute(&ctx).await {

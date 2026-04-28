@@ -16,6 +16,7 @@ The library is built around three pluggable layers:
 | **Stores** (`PlayerStore`, `InventoryStore`, `LeaderboardStore`) | Persistence | In-memory → SQLite, PostgreSQL |
 | **Commands** (`StartCommand`, `UseItemCommand`, …) | Game actions | Add new commands without touching existing code |
 | **Items** (`define_items!` macro) | Dice, tokens, etc. | One struct + one macro line per new item |
+| **Cooldowns** (`CooldownConfig`) | Roll limits | Default: 24h cooldown, reset at midnight UTC |
 
 Frontends (CLI, Discord) only interact with `Game::execute(command)` — they never
 touch stores or game logic directly.
@@ -57,6 +58,11 @@ Available commands:
 /leaderboard  — show top scores
 /quit         — exit
 ```
+
+Dice rolls are limited by `CooldownConfig`. By default, players can roll once per
+UTC day: after a dice roll, they are blocked until either midnight UTC passes or
+the configured cooldown duration elapses. Reroll tokens clear the player's roll
+cooldown and are consumed when used.
 
 ## Library usage
 

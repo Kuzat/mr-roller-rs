@@ -1,6 +1,8 @@
 use async_trait::async_trait;
+use chrono::Utc;
 
 use crate::{
+    cooldown::CooldownConfig,
     errors::MrRollerError,
     game::{
         inventory::ItemId,
@@ -16,6 +18,7 @@ pub struct Context<'a> {
     pub players: &'a dyn PlayerStore,
     pub inventory: &'a dyn InventoryStore,
     pub leaderboard: &'a dyn LeaderboardStore,
+    pub cooldown: &'a CooldownConfig,
 }
 
 /// Every game action implements Command. The `Output` is converted into a
@@ -69,34 +72,50 @@ impl Command for UseItemCommand {
     type Output = Response;
 
     async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
-        // Verify player exists
-        ctx.players.get(self.player_id).await?;
-
+        let mut player = ctx.players.get(self.player_id).await?;
         let item = ctx.inventory.get_item(self.player_id, self.item_id).await?;
-        let response = item.handle();
+        let now = Utc::now();
 
-        // If it was a dice roll, update the leaderboard
-        if response.kind == ResponseKind::DiceRoll {
-            if let Some(data) = &response.data {
-                if let Some(roll) = data.get("roll").and_then(|v| v.as_u64()) {
-                    let mut player = ctx.players.get(self.player_id).await?;
-                    player.xp += roll;
-                    ctx.players
-                        .insert(player.clone())
-                        .await
-                        .ok(); // ignore AlreadyInGame on update — we know they exist
-
-                    ctx.leaderboard
-                        .update_score(
-                            self.player_id,
-                            crate::store::leaderboard::Score {
-                                xp: player.xp,
-                                coins: player.coins,
-                            },
-                        )
-                        .await?;
+        if item.consumes_daily_roll() {
+            if let Some(last_roll_at) = player.last_roll_at {
+                if ctx.cooldown.is_on_cooldown(last_roll_at, now) {
+                    return Ok(Response::error(
+                        "You have already rolled. Your roll cooldown is still active.",
+                    ));
                 }
             }
+        } else {
+            // Reroll-style items do not consume the daily roll. In this game,
+            // using one clears the player's roll cooldown so they can roll once more.
+            // The token itself is consumed from inventory.
+            player.last_roll_at = None;
+            ctx.players.update(player).await?;
+            ctx.inventory.remove_item(self.player_id, self.item_id).await?;
+            return Ok(item.handle());
+        }
+
+        let response = item.handle();
+
+        // If it was a dice roll, update player roll state and leaderboard.
+        if response.kind == ResponseKind::DiceRoll {
+            player.last_roll_at = Some(now);
+
+            if let Some(data) = &response.data {
+                if let Some(roll) = data.get("roll").and_then(|v| v.as_u64()) {
+                    player.xp += roll;
+                }
+            }
+
+            ctx.players.update(player.clone()).await?;
+            ctx.leaderboard
+                .update_score(
+                    self.player_id,
+                    crate::store::leaderboard::Score {
+                        xp: player.xp,
+                        coins: player.coins,
+                    },
+                )
+                .await?;
         }
 
         Ok(response)
@@ -177,19 +196,22 @@ impl Command for LeaderboardCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{
-        InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore,
+    use crate::{
+        game::item::tokens::reroll_token::RerollToken,
+        store::{InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore},
     };
 
     fn make_context<'a>(
         players: &'a InMemoryPlayerStore,
         inventory: &'a InMemoryInventoryStore,
         leaderboard: &'a InMemoryLeaderboardStore,
+        cooldown: &'a CooldownConfig,
     ) -> Context<'a> {
         Context {
             players,
             inventory,
             leaderboard,
+            cooldown,
         }
     }
 
@@ -200,7 +222,8 @@ mod tests {
         let players = InMemoryPlayerStore::new();
         let inventory = InMemoryInventoryStore::new();
         let leaderboard = InMemoryLeaderboardStore::new();
-        let ctx = make_context(&players, &inventory, &leaderboard);
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
 
         let cmd = StartCommand {
             player_id: PlayerId::new(1),
@@ -222,7 +245,8 @@ mod tests {
         let players = InMemoryPlayerStore::new();
         let inventory = InMemoryInventoryStore::new();
         let leaderboard = InMemoryLeaderboardStore::new();
-        let ctx = make_context(&players, &inventory, &leaderboard);
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
 
         // First start succeeds
         StartCommand {
@@ -249,7 +273,8 @@ mod tests {
         let players = InMemoryPlayerStore::new();
         let inventory = InMemoryInventoryStore::new();
         let leaderboard = InMemoryLeaderboardStore::new();
-        let ctx = make_context(&players, &inventory, &leaderboard);
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
 
         // Start a player
         StartCommand {
@@ -282,11 +307,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_second_dice_roll_same_day_is_blocked() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        StartCommand {
+            player_id: PlayerId::new(1),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        let item_id = inventory
+            .add_item(PlayerId::new(1), Item::BasicDice(BasicDice::regular_dice()))
+            .await
+            .unwrap();
+
+        let first = UseItemCommand {
+            player_id: PlayerId::new(1),
+            item_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(first.kind, ResponseKind::DiceRoll);
+
+        let second = UseItemCommand {
+            player_id: PlayerId::new(1),
+            item_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(second.kind, ResponseKind::Error);
+        assert!(second.message.contains("cooldown"));
+    }
+
+    #[tokio::test]
+    async fn test_reroll_token_clears_roll_cooldown() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        StartCommand {
+            player_id: PlayerId::new(1),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        let dice_id = inventory
+            .add_item(PlayerId::new(1), Item::BasicDice(BasicDice::regular_dice()))
+            .await
+            .unwrap();
+        let token_id = inventory
+            .add_item(PlayerId::new(1), Item::RerollToken(RerollToken::new()))
+            .await
+            .unwrap();
+
+        let first = UseItemCommand {
+            player_id: PlayerId::new(1),
+            item_id: dice_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(first.kind, ResponseKind::DiceRoll);
+
+        let token = UseItemCommand {
+            player_id: PlayerId::new(1),
+            item_id: token_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(token.kind, ResponseKind::Success);
+
+        let second_roll = UseItemCommand {
+            player_id: PlayerId::new(1),
+            item_id: dice_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(second_roll.kind, ResponseKind::DiceRoll);
+    }
+
+    #[tokio::test]
     async fn test_use_item_player_not_found() {
         let players = InMemoryPlayerStore::new();
         let inventory = InMemoryInventoryStore::new();
         let leaderboard = InMemoryLeaderboardStore::new();
-        let ctx = make_context(&players, &inventory, &leaderboard);
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
 
         let err = UseItemCommand {
             player_id: PlayerId::new(999),
@@ -306,7 +424,8 @@ mod tests {
         let players = InMemoryPlayerStore::new();
         let inventory = InMemoryInventoryStore::new();
         let leaderboard = InMemoryLeaderboardStore::new();
-        let ctx = make_context(&players, &inventory, &leaderboard);
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
 
         StartCommand {
             player_id: PlayerId::new(1),
@@ -331,7 +450,8 @@ mod tests {
         let players = InMemoryPlayerStore::new();
         let inventory = InMemoryInventoryStore::new();
         let leaderboard = InMemoryLeaderboardStore::new();
-        let ctx = make_context(&players, &inventory, &leaderboard);
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
 
         let resp = LeaderboardCommand { limit: 10 }
             .execute(&ctx)

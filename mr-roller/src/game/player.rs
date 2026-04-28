@@ -1,4 +1,4 @@
-use chrono::Duration;
+use chrono::{DateTime, Utc};
 use std::fmt::Debug;
 
 /// Uniquely identifies a player in the game.
@@ -16,7 +16,8 @@ impl PlayerId {
 #[derive(Debug, Clone)]
 pub struct Player {
     pub id: PlayerId,
-    pub cooldown: Duration,
+    /// When the player last rolled a dice. `None` if they haven't rolled yet.
+    pub last_roll_at: Option<DateTime<Utc>>,
     pub luck: u64,
     pub coins: u64,
     pub xp: u64,
@@ -26,7 +27,7 @@ impl Player {
     pub fn new(id: PlayerId) -> Player {
         Player {
             id,
-            cooldown: Duration::days(1),
+            last_roll_at: None,
             luck: 0,
             coins: 0,
             xp: 0,
@@ -51,5 +52,6 @@ mod tests {
         assert_eq!(player.id, PlayerId(1));
         assert_eq!(player.coins, 0);
         assert_eq!(player.xp, 0);
+        assert!(player.last_roll_at.is_none());
     }
 }
