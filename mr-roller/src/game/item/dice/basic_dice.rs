@@ -7,7 +7,7 @@ use crate::{
     output::{self, MrRollerOutput},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BasicDice {
     pub name: String,
     pub description: String,

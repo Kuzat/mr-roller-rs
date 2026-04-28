@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use crate::{game::item::Usable, output};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RerollToken {
     pub name: String,
     pub description: String,

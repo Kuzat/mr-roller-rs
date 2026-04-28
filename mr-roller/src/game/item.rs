@@ -3,7 +3,7 @@ use crate::output::{self};
 pub mod dice;
 pub mod tokens;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Item {
     BasicDice(dice::basic_dice::BasicDice),
     RerollToken(tokens::reroll_token::RerollToken),
