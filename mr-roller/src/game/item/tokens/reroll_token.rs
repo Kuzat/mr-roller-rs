@@ -1,12 +1,26 @@
 use std::fmt::Display;
 
-use crate::response::Response;
+use crate::{game::item::GameItem, response::Response};
 
 #[derive(Debug, Clone)]
 pub struct RerollToken {
     pub name: String,
     pub description: String,
     pub amount: u32,
+}
+
+impl GameItem for RerollToken {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn handle(&self) -> Response {
+        Response::success("Reroll token used — re-rolling your last dice!")
+    }
 }
 
 impl RerollToken {
@@ -16,10 +30,6 @@ impl RerollToken {
             description: String::from("A token that allows you to reroll a dice"),
             amount: 1,
         }
-    }
-
-    pub fn handle(&self) -> Response {
-        Response::success("Reroll token used — re-rolling your last dice!")
     }
 }
 

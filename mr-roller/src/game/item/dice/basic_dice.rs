@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use rand::{thread_rng, Rng};
 
-use crate::response::Response;
+use crate::{game::item::GameItem, response::Response};
 
 #[derive(Debug, Clone)]
 pub struct BasicDice {
@@ -10,6 +10,21 @@ pub struct BasicDice {
     pub description: String,
     pub min_roll: u32,
     pub max_roll: u32,
+}
+
+impl GameItem for BasicDice {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn description(&self) -> &str {
+        &self.description
+    }
+
+    fn handle(&self) -> Response {
+        let random_roll = thread_rng().gen_range(self.min_roll..=self.max_roll);
+        Response::dice_roll(format!("You rolled a {}!", random_roll), random_roll)
+    }
 }
 
 impl BasicDice {
@@ -29,11 +44,6 @@ impl BasicDice {
             min_roll: 1,
             max_roll: 2,
         }
-    }
-
-    pub fn handle(&self) -> Response {
-        let random_roll = thread_rng().gen_range(self.min_roll..=self.max_roll);
-        Response::dice_roll(format!("You rolled a {}!", random_roll), random_roll)
     }
 }
 

@@ -1,45 +1,89 @@
+use std::fmt::Debug;
+
 use crate::response::Response;
 
 pub mod dice;
 pub mod tokens;
 
-#[derive(Debug, Clone)]
-pub enum Item {
-    BasicDice(dice::basic_dice::BasicDice),
-    RerollToken(tokens::reroll_token::RerollToken),
+// ── GameItem trait — contract every item struct must fulfil ────────────────
+
+pub trait GameItem: Debug + Clone + Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn handle(&self) -> Response;
 }
 
-impl Item {
-    pub fn name(&self) -> &str {
-        match self {
-            Item::BasicDice(d) => &d.name,
-            Item::RerollToken(t) => &t.name,
-        }
-    }
+// ── define_items! macro — one line per item type ───────────────────────────
 
-    pub fn description(&self) -> &str {
-        match self {
-            Item::BasicDice(d) => &d.description,
-            Item::RerollToken(t) => &t.description,
+/// Define the `Item` enum, `From` conversions, accessor helpers, and
+/// delegate methods (`name`, `description`, `handle`) — all generated from
+/// a single declarative block.
+///
+/// Usage:
+/// ```ignore
+/// define_items! {
+///     BasicDice(basic_dice::BasicDice) as basic_dice,
+///     RerollToken(tokens::reroll_token::RerollToken) as reroll_token,
+/// }
+/// ```
+#[macro_export]
+macro_rules! define_items {
+    (
+        $(
+            $variant:ident($ty:ty) as $snake:ident
+        ),+ $(,)?
+    ) => {
+        #[derive(Debug, Clone)]
+        pub enum Item {
+            $($variant($ty)),+
         }
-    }
 
-    pub fn handle(&self) -> Response {
-        match self {
-            Item::BasicDice(dice) => dice.handle(),
-            Item::RerollToken(token) => token.handle(),
+        $(
+            impl From<$ty> for Item {
+                fn from(v: $ty) -> Self {
+                    Item::$variant(v)
+                }
+            }
+        )+
+
+        impl Item {
+            $(
+                /// Returns `Some` if this item is a `$variant`, `None` otherwise.
+                pub fn $snake(self) -> Option<$ty> {
+                    match self {
+                        Item::$variant(v) => Some(v),
+                        _ => None,
+                    }
+                }
+            )+
+
+            /// Returns the human-readable name of the item.
+            pub fn name(&self) -> &str {
+                match self {
+                    $(Item::$variant(item) => $crate::game::item::GameItem::name(item)),+
+                }
+            }
+
+            /// Returns a short description of the item.
+            pub fn description(&self) -> &str {
+                match self {
+                    $(Item::$variant(item) => $crate::game::item::GameItem::description(item)),+
+                }
+            }
+
+            /// Activates the item and returns the result.
+            pub fn handle(&self) -> Response {
+                match self {
+                    $(Item::$variant(item) => $crate::game::item::GameItem::handle(item)),+
+                }
+            }
         }
-    }
+    };
 }
 
-//     CompletedUseable {
-//         item: Usable,
-//         output: output::MrRollerOutput,
-//     },
-//     // Item that only used partially and still require further actions
-//     UnCompletedUsable {
-//         item: Usable,
-//         output: output::MrRollerOutput,
-//         // TODO: Some more fields for potential actions to be taken
-//     },
-// }
+// ── Item registry — add new items here ─────────────────────────────────────
+
+define_items! {
+    BasicDice(dice::basic_dice::BasicDice) as basic_dice,
+    RerollToken(tokens::reroll_token::RerollToken) as reroll_token,
+}
