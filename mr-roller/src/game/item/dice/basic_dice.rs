@@ -40,7 +40,7 @@ impl BasicDice {
     pub fn starter_dice() -> BasicDice {
         BasicDice {
             name: String::from("Starter Dice"),
-            description: String::from("A dice with only 2 sides. Is this even a dice?"),
+            description: String::from("A dice with only 2 sides. dice or coin?"),
             min_roll: 1,
             max_roll: 2,
         }

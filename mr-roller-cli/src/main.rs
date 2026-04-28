@@ -149,7 +149,7 @@ fn print_response(response: &mr_roller::response::Response) {
                         let id = item["id"].as_str().unwrap_or("?");
                         let name = item["name"].as_str().unwrap_or("?");
                         let desc = item["description"].as_str().unwrap_or("");
-                        println!("    [{:.8}] {} — {}", id, name, desc);
+                        println!("    [{}] {} — {}", id, name, desc);
                     }
                 }
             }
