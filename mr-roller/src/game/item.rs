@@ -85,5 +85,7 @@ macro_rules! define_items {
 
 define_items! {
     BasicDice(dice::basic_dice::BasicDice) as basic_dice,
+    LuckyDice(dice::lucky_dice::LuckyDice) as lucky_dice,
+    CursedDice(dice::cursed_dice::CursedDice) as cursed_dice,
     RerollToken(tokens::reroll_token::RerollToken) as reroll_token,
 }
