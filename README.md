@@ -49,6 +49,13 @@ cargo run -p mr-roller-cli          # player ID 1 (default)
 cargo run -p mr-roller-cli -- 42    # player ID 42
 ```
 
+By default the CLI uses in-memory storage. To persist data in SQLite, set
+`MR_ROLLER_DB_URL`:
+
+```bash
+MR_ROLLER_DB_URL='sqlite:mr-roller.db?mode=rwc' cargo run -p mr-roller-cli
+```
+
 Available commands:
 
 ```

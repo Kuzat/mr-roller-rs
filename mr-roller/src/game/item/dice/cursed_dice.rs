@@ -1,7 +1,7 @@
 use crate::{game::item::GameItem, response::Response};
 use rand::{thread_rng, Rng};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CursedDice {
     pub name: String,
     pub description: String,

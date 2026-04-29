@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use std::fmt::Debug;
 
 /// Uniquely identifies a player in the game.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PlayerId(pub u64);
 
 impl PlayerId {
@@ -13,7 +13,7 @@ impl PlayerId {
 
 /// Player is a plain data struct. Inventory is managed separately via
 /// `InventoryStore`, scores via `LeaderboardStore`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Player {
     pub id: PlayerId,
     /// When the player last rolled a dice. `None` if they haven't rolled yet.

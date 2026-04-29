@@ -5,14 +5,14 @@ use mr_roller::{
     game::{player::PlayerId, Game},
     response::ResponseKind,
     store::{
-        InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore,
+        InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore, SqliteStore,
     },
 };
 
 #[tokio::main]
 async fn main() {
     let player_id = parse_player_id();
-    let game = build_game();
+    let game = build_game().await;
 
     println!("🎲 Mr Roller CLI");
     println!("  /start       — join the game");
@@ -60,7 +60,21 @@ fn parse_player_id() -> PlayerId {
     PlayerId::new(1)
 }
 
-fn build_game() -> Game {
+async fn build_game() -> Game {
+    if let Ok(database_url) = std::env::var("MR_ROLLER_DB_URL") {
+        match SqliteStore::connect(&database_url).await {
+            Ok(store) => {
+                println!("Using SQLite store: {}", database_url);
+                let store = Arc::new(store);
+                return Game::new(store.clone(), store.clone(), store);
+            }
+            Err(err) => {
+                eprintln!("Failed to open SQLite store: {}", err);
+                eprintln!("Falling back to in-memory store.");
+            }
+        }
+    }
+
     Game::new(
         Arc::new(InMemoryPlayerStore::new()),
         Arc::new(InMemoryInventoryStore::new()),

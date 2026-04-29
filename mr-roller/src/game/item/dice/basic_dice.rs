@@ -4,7 +4,7 @@ use rand::{thread_rng, Rng};
 
 use crate::{game::item::GameItem, response::Response};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BasicDice {
     pub name: String,
     pub description: String,

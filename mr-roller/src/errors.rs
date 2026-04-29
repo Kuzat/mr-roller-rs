@@ -5,6 +5,7 @@ pub enum MrRollerError {
     PlayerNotFound,
     PlayerAlreadyInGame,
     ItemNotFound,
+    Storage(String),
 }
 
 impl Display for MrRollerError {
@@ -13,6 +14,19 @@ impl Display for MrRollerError {
             MrRollerError::PlayerNotFound => write!(f, "Player not found"),
             MrRollerError::PlayerAlreadyInGame => write!(f, "Player already in game"),
             MrRollerError::ItemNotFound => write!(f, "Item not found"),
+            MrRollerError::Storage(message) => write!(f, "Storage error: {}", message),
         }
+    }
+}
+
+impl From<sqlx::Error> for MrRollerError {
+    fn from(value: sqlx::Error) -> Self {
+        MrRollerError::Storage(value.to_string())
+    }
+}
+
+impl From<serde_json::Error> for MrRollerError {
+    fn from(value: serde_json::Error) -> Self {
+        MrRollerError::Storage(value.to_string())
     }
 }

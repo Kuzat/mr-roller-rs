@@ -40,7 +40,7 @@ macro_rules! define_items {
             $variant:ident($ty:ty) as $snake:ident
         ),+ $(,)?
     ) => {
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
         pub enum Item {
             $($variant($ty)),+
         }

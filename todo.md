@@ -14,8 +14,8 @@
 - [x] Cooldown system: one roll per day by default, configurable duration/reset, reroll token reset
 
 ## Library — Remaining
-- [ ] Add `serde` derives to items for database serialization
-- [ ] Phase 6: Database-backed stores (SQLite via sqlx)
+- [x] Add `serde` derives to items for database serialization
+- [x] Phase 6: Database-backed stores (SQLite via sqlx)
 - [ ] Implement Shop and Event game systems
 - [ ] Implement partial item use / CompletedUseable workflow
 - [ ] Consider extracting `Game`/`Context` into a builder pattern
