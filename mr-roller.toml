@@ -17,6 +17,7 @@ url = "sqlite:mr-roller-test.db?mode=rwc"
 
 [events]
 enabled = true
+check_interval_seconds = 60
 spawn_chance_per_check = 0.004
 max_active_events = 1
 

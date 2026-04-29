@@ -2,6 +2,7 @@ pub mod command;
 pub mod config;
 pub mod cooldown;
 pub mod errors;
+pub mod event_scheduler;
 pub mod game;
 pub mod response;
 pub mod store;

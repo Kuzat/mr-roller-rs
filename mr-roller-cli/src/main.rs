@@ -7,7 +7,8 @@ use mr_roller::{
         LeaderboardCommand, ListActiveEventsCommand, ShopCommand, ShopItemKind,
         SpawnRandomItemEventCommand, StartCommand, TrashEventCommand, UseItemCommand,
     },
-    config::Settings,
+    config::{EventsConfig, Settings},
+    event_scheduler::EventScheduler,
     game::{player::PlayerId, Game},
     response::ResponseKind,
     store::{InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore, SqliteStore},
@@ -17,7 +18,8 @@ use mr_roller::{
 async fn main() {
     let player_id = parse_player_id();
     let settings = Settings::load().expect("failed to load Mr Roller configuration");
-    let game = build_game(&settings).await;
+    let game = Arc::new(build_game(&settings).await);
+    start_event_scheduler(game.clone(), settings.events.clone());
 
     println!("🎲 Mr Roller CLI");
     println!("  /start       — join the game");
@@ -68,6 +70,32 @@ fn parse_player_id() -> PlayerId {
     }
     // Default player ID
     PlayerId::new(1)
+}
+
+fn start_event_scheduler(game: Arc<Game>, events_config: EventsConfig) {
+    if !events_config.enabled {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("failed to start event scheduler runtime");
+        let scheduler = EventScheduler::from_seconds(events_config.check_interval_seconds);
+
+        runtime.block_on(async move {
+            scheduler
+                .run(game, |response| async move {
+                    println!();
+                    print_response(&response);
+                    use std::io::Write;
+                    print!("> ");
+                    io::stdout().flush().ok();
+                })
+                .await;
+        });
+    });
 }
 
 async fn build_game(settings: &Settings) -> Game {

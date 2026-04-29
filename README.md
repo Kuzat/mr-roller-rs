@@ -129,6 +129,7 @@ Random item spawn is configurable in `mr-roller.toml`:
 ```toml
 [events]
 enabled = true
+check_interval_seconds = 60
 spawn_chance_per_check = 0.004
 max_active_events = 1
 
@@ -140,6 +141,11 @@ timeout_seconds = 900
 kind = "regular_dice"
 weight = 5
 ```
+
+The CLI starts a background event scheduler when events are enabled. It checks
+for random item spawns every `check_interval_seconds` and prints spawned events
+to the terminal. A Discord/server runtime can reuse the same `EventScheduler`
+and publish spawned event responses as Discord messages/buttons.
 
 ## Database migrations
 

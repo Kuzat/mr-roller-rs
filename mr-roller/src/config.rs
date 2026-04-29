@@ -33,6 +33,7 @@ pub struct DatabaseConfig {
 #[serde(default)]
 pub struct EventsConfig {
     pub enabled: bool,
+    pub check_interval_seconds: u64,
     pub spawn_chance_per_check: f64,
     pub max_active_events: usize,
     pub random_item_spawn: RandomItemSpawnConfig,
@@ -42,6 +43,7 @@ impl Default for EventsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            check_interval_seconds: 60,
             spawn_chance_per_check: 0.004,
             max_active_events: 1,
             random_item_spawn: RandomItemSpawnConfig::default(),
@@ -136,6 +138,7 @@ mod tests {
         let settings = Settings::default();
         assert!(settings.admin.bootstrap_admin_ids.is_empty());
         assert!(settings.database.url.is_none());
+        assert_eq!(settings.events.check_interval_seconds, 60);
     }
 
     #[test]

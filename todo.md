@@ -20,7 +20,8 @@
   - [x] First shop slice: list dice, buy dice with coins, dice rolls award coins
   - [x] Admin coin adjustment command
   - [x] First event slice: global random item spawn with configurable weighted items
-  - [ ] Add background event scheduler/runner for Discord/server runtime
+  - [x] Add reusable background event scheduler/runner
+  - [ ] Add Discord/server event publisher integration
 - [ ] Implement partial item use / CompletedUseable workflow
 - [ ] Consider extracting `Game`/`Context` into a builder pattern
 
