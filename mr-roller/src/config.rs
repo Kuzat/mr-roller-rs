@@ -14,6 +14,7 @@ use serde::Deserialize;
 pub struct Settings {
     pub admin: AdminConfig,
     pub database: DatabaseConfig,
+    pub events: EventsConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -26,6 +27,73 @@ pub struct AdminConfig {
 #[serde(default)]
 pub struct DatabaseConfig {
     pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct EventsConfig {
+    pub enabled: bool,
+    pub spawn_chance_per_check: f64,
+    pub max_active_events: usize,
+    pub random_item_spawn: RandomItemSpawnConfig,
+}
+
+impl Default for EventsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            spawn_chance_per_check: 0.004,
+            max_active_events: 1,
+            random_item_spawn: RandomItemSpawnConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RandomItemSpawnConfig {
+    pub enabled: bool,
+    pub timeout_seconds: u64,
+    pub items: Vec<WeightedEventItemConfig>,
+}
+
+impl Default for RandomItemSpawnConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timeout_seconds: 900,
+            items: vec![
+                WeightedEventItemConfig {
+                    kind: "regular_dice".to_string(),
+                    weight: 5,
+                },
+                WeightedEventItemConfig {
+                    kind: "lucky_dice".to_string(),
+                    weight: 1,
+                },
+                WeightedEventItemConfig {
+                    kind: "cursed_dice".to_string(),
+                    weight: 3,
+                },
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WeightedEventItemConfig {
+    pub kind: String,
+    pub weight: u32,
+}
+
+impl Default for WeightedEventItemConfig {
+    fn default() -> Self {
+        Self {
+            kind: "regular_dice".to_string(),
+            weight: 1,
+        }
+    }
 }
 
 impl Settings {
@@ -77,6 +145,7 @@ mod tests {
                 bootstrap_admin_ids: vec![1, 42],
             },
             database: DatabaseConfig::default(),
+            events: EventsConfig::default(),
         };
 
         assert_eq!(

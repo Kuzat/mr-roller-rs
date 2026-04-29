@@ -19,6 +19,7 @@ pub enum ResponseKind {
     Inventory,
     Leaderboard,
     Shop,
+    Event,
 }
 
 impl Response {
@@ -67,6 +68,14 @@ impl Response {
             kind: ResponseKind::Shop,
             message: message.into(),
             data: Some(entries),
+        }
+    }
+
+    pub fn event(message: impl Into<String>, data: serde_json::Value) -> Self {
+        Response {
+            kind: ResponseKind::Event,
+            message: message.into(),
+            data: Some(data),
         }
     }
 }

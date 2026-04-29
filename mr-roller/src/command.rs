@@ -1,10 +1,13 @@
 use async_trait::async_trait;
 use chrono::Utc;
+use rand::{thread_rng, Rng};
 
 use crate::{
+    config::EventsConfig,
     cooldown::CooldownConfig,
     errors::MrRollerError,
     game::{
+        event::{ActiveEvent, EventId, EventKind, EventStatus},
         inventory::ItemId,
         item::{
             dice::{basic_dice::BasicDice, cursed_dice::CursedDice, lucky_dice::LuckyDice},
@@ -14,7 +17,7 @@ use crate::{
         player::PlayerId,
     },
     response::{Response, ResponseKind},
-    store::{leaderboard::Score, InventoryStore, LeaderboardStore, PlayerStore},
+    store::{leaderboard::Score, EventStore, InventoryStore, LeaderboardStore, PlayerStore},
 };
 
 /// Context provides command handlers with access to all persistent stores.
@@ -22,8 +25,10 @@ pub struct Context<'a> {
     pub players: &'a dyn PlayerStore,
     pub inventory: &'a dyn InventoryStore,
     pub leaderboard: &'a dyn LeaderboardStore,
+    pub events: &'a dyn EventStore,
     pub cooldown: &'a CooldownConfig,
     pub bootstrap_admin_ids: &'a [PlayerId],
+    pub event_config: &'a EventsConfig,
 }
 
 /// Every game action implements Command. The `Output` is converted into a
@@ -409,6 +414,204 @@ async fn require_admin(
     }
 }
 
+fn event_to_json(event: &ActiveEvent) -> serde_json::Value {
+    let item_name = match &event.kind {
+        EventKind::RandomItemSpawn { item } => Some(item.name().to_string()),
+    };
+
+    serde_json::json!({
+        "id": event.id.to_string(),
+        "title": event.title(),
+        "description": event.description(),
+        "status": match &event.status {
+            EventStatus::Active => "active",
+            EventStatus::Claimed { .. } => "claimed",
+            EventStatus::Trashed { .. } => "trashed",
+            EventStatus::Expired => "expired",
+        },
+        "item_name": item_name,
+        "expires_at": event.expires_at.to_rfc3339(),
+    })
+}
+
+fn configured_random_item(ctx: &Context<'_>) -> Result<Item, MrRollerError> {
+    let candidates: Vec<_> = ctx
+        .event_config
+        .random_item_spawn
+        .items
+        .iter()
+        .filter(|entry| entry.weight > 0)
+        .collect();
+
+    if candidates.is_empty() {
+        return Err(MrRollerError::Storage(
+            "Random item spawn has no configured items".to_string(),
+        ));
+    }
+
+    let total_weight: u32 = candidates.iter().map(|entry| entry.weight).sum();
+    let mut roll = thread_rng().gen_range(0..total_weight);
+    for entry in candidates {
+        if roll < entry.weight {
+            let kind = entry
+                .kind
+                .parse::<AdminItemKind>()
+                .map_err(MrRollerError::Storage)?;
+            return Ok(kind.into());
+        }
+        roll -= entry.weight;
+    }
+
+    Err(MrRollerError::Storage(
+        "Failed to choose random event item".to_string(),
+    ))
+}
+
+// ── Events ─────────────────────────────────────────────────────────────────
+
+pub struct ListActiveEventsCommand;
+
+#[async_trait]
+impl Command for ListActiveEventsCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        let now = Utc::now();
+        let events: Vec<_> = ctx
+            .events
+            .list_events()
+            .await?
+            .into_iter()
+            .filter(|event| event.is_active(now))
+            .map(|event| event_to_json(&event))
+            .collect();
+
+        if events.is_empty() {
+            Ok(Response::event("No active events.", serde_json::json!([])))
+        } else {
+            Ok(Response::event("Active events:", serde_json::json!(events)))
+        }
+    }
+}
+
+pub struct MaybeSpawnRandomItemEventCommand;
+
+#[async_trait]
+impl Command for MaybeSpawnRandomItemEventCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        if !ctx.event_config.enabled || !ctx.event_config.random_item_spawn.enabled {
+            return Ok(Response::event(
+                "Events are disabled.",
+                serde_json::json!(null),
+            ));
+        }
+
+        let active_count = ctx
+            .events
+            .list_events()
+            .await?
+            .into_iter()
+            .filter(|event| event.is_active(Utc::now()))
+            .count();
+        if active_count >= ctx.event_config.max_active_events {
+            return Ok(Response::event(
+                "No event spawned because the active event limit has been reached.",
+                serde_json::json!(null),
+            ));
+        }
+
+        if !thread_rng().gen_bool(ctx.event_config.spawn_chance_per_check) {
+            return Ok(Response::event(
+                "No event spawned.",
+                serde_json::json!(null),
+            ));
+        }
+
+        spawn_random_item_event(ctx).await
+    }
+}
+
+pub struct SpawnRandomItemEventCommand {
+    pub admin_id: PlayerId,
+}
+
+#[async_trait]
+impl Command for SpawnRandomItemEventCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        if let Some(response) = require_admin(ctx, self.admin_id).await? {
+            return Ok(response);
+        }
+        spawn_random_item_event(ctx).await
+    }
+}
+
+async fn spawn_random_item_event(ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+    let item = configured_random_item(ctx)?;
+    let event =
+        ActiveEvent::random_item_spawn(item, ctx.event_config.random_item_spawn.timeout_seconds);
+    let data = event_to_json(&event);
+    ctx.events.insert_event(event).await?;
+    Ok(Response::event("Random item event spawned.", data))
+}
+
+pub struct ClaimEventCommand {
+    pub player_id: PlayerId,
+    pub event_id: EventId,
+}
+
+#[async_trait]
+impl Command for ClaimEventCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        ctx.players.get(self.player_id).await?;
+        let mut event = ctx.events.get_event(self.event_id).await?;
+        if !event.is_active(Utc::now()) {
+            return Ok(Response::error("This event is no longer active."));
+        }
+
+        match &event.kind {
+            EventKind::RandomItemSpawn { item } => {
+                ctx.inventory.add_item(self.player_id, item.clone()).await?;
+            }
+        }
+
+        event.status = EventStatus::Claimed {
+            player_id: self.player_id,
+        };
+        ctx.events.update_event(event.clone()).await?;
+        Ok(Response::event("Event claimed.", event_to_json(&event)))
+    }
+}
+
+pub struct TrashEventCommand {
+    pub player_id: PlayerId,
+    pub event_id: EventId,
+}
+
+#[async_trait]
+impl Command for TrashEventCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        ctx.players.get(self.player_id).await?;
+        let mut event = ctx.events.get_event(self.event_id).await?;
+        if !event.is_active(Utc::now()) {
+            return Ok(Response::error("This event is no longer active."));
+        }
+
+        event.status = EventStatus::Trashed {
+            player_id: self.player_id,
+        };
+        ctx.events.update_event(event.clone()).await?;
+        Ok(Response::event("Event trashed.", event_to_json(&event)))
+    }
+}
+
 // ── Leaderboard ────────────────────────────────────────────────────────────
 
 pub struct LeaderboardCommand {
@@ -463,7 +666,7 @@ impl Command for AdminHelpCommand {
         }
 
         Ok(Response::success(format!(
-            "Admin commands: /admin give <player-id> <item>, /admin coins <player-id> <amount>, /admin set-admin <player-id> <true|false>. Items: {}",
+            "Admin commands:\n  /admin give <player-id> <item>\n  /admin coins <player-id> <amount>\n  /admin event spawn-random-item\n  /admin set-admin <player-id> <true|false>\nItems: {}",
             AdminItemKind::keys().join(", ")
         )))
     }
@@ -583,7 +786,9 @@ impl Command for AdminSetAdminCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore};
+    use crate::store::{
+        InMemoryEventStore, InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore,
+    };
 
     fn make_context<'a>(
         players: &'a InMemoryPlayerStore,
@@ -595,8 +800,10 @@ mod tests {
             players,
             inventory,
             leaderboard,
+            events: Box::leak(Box::new(InMemoryEventStore::new())),
             cooldown,
             bootstrap_admin_ids: &[],
+            event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
         }
     }
 
@@ -636,8 +843,10 @@ mod tests {
             players: &players,
             inventory: &inventory,
             leaderboard: &leaderboard,
+            events: Box::leak(Box::new(InMemoryEventStore::new())),
             cooldown: &cooldown,
             bootstrap_admin_ids: &bootstrap_admin_ids,
+            event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
         };
 
         StartCommand {
@@ -661,8 +870,10 @@ mod tests {
             players: &players,
             inventory: &inventory,
             leaderboard: &leaderboard,
+            events: Box::leak(Box::new(InMemoryEventStore::new())),
             cooldown: &cooldown,
             bootstrap_admin_ids: &bootstrap_admin_ids,
+            event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
         };
 
         players
@@ -692,8 +903,10 @@ mod tests {
             players: &players,
             inventory: &inventory,
             leaderboard: &leaderboard,
+            events: Box::leak(Box::new(InMemoryEventStore::new())),
             cooldown: &cooldown,
             bootstrap_admin_ids: &bootstrap_admin_ids,
+            event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
         };
 
         players
@@ -1006,6 +1219,128 @@ mod tests {
         assert_eq!(resp.kind, ResponseKind::Error);
         assert!(inventory
             .list_items(PlayerId::new(1))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    // ── EventCommand tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_admin_spawn_random_item_event_and_claim() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let events = InMemoryEventStore::new();
+        let cooldown = CooldownConfig::default();
+        let event_config = crate::config::EventsConfig::default();
+        let ctx = Context {
+            players: &players,
+            inventory: &inventory,
+            leaderboard: &leaderboard,
+            events: &events,
+            cooldown: &cooldown,
+            bootstrap_admin_ids: &[],
+            event_config: &event_config,
+        };
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        let spawned = SpawnRandomItemEventCommand {
+            admin_id: PlayerId::new(1),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(spawned.kind, ResponseKind::Event);
+        let event_id = spawned.data.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        let claimed = ClaimEventCommand {
+            player_id: PlayerId::new(2),
+            event_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(claimed.kind, ResponseKind::Event);
+        assert_eq!(
+            inventory.list_items(PlayerId::new(2)).await.unwrap().len(),
+            1
+        );
+        assert!(matches!(
+            events.get_event(event_id).await.unwrap().status,
+            EventStatus::Claimed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_trash_event_prevents_claim() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let events = InMemoryEventStore::new();
+        let cooldown = CooldownConfig::default();
+        let event_config = crate::config::EventsConfig::default();
+        let ctx = Context {
+            players: &players,
+            inventory: &inventory,
+            leaderboard: &leaderboard,
+            events: &events,
+            cooldown: &cooldown,
+            bootstrap_admin_ids: &[],
+            event_config: &event_config,
+        };
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        let spawned = SpawnRandomItemEventCommand {
+            admin_id: PlayerId::new(1),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        let event_id = spawned.data.unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
+
+        let trashed = TrashEventCommand {
+            player_id: PlayerId::new(2),
+            event_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(trashed.kind, ResponseKind::Event);
+
+        let claim = ClaimEventCommand {
+            player_id: PlayerId::new(2),
+            event_id,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+        assert_eq!(claim.kind, ResponseKind::Error);
+        assert!(inventory
+            .list_items(PlayerId::new(2))
             .await
             .unwrap()
             .is_empty());

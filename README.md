@@ -17,6 +17,7 @@ The library is built around three pluggable layers:
 | **Commands** (`StartCommand`, `UseItemCommand`, …) | Game actions | Add new commands without touching existing code |
 | **Items** (`define_items!` macro) | Dice, tokens, etc. | One struct + one macro line per new item |
 | **Cooldowns** (`CooldownConfig`) | Roll limits | Default: 24h cooldown, reset at midnight UTC |
+| **Events** (`EventStore`, event commands) | Global random events | Core logic is frontend-agnostic |
 | **Migrations** (`mr-roller/migrations`) | SQLite schema changes | Managed by `sqlx::migrate!` |
 
 Frontends (CLI, Discord) only interact with `Game::execute(command)` — they never
@@ -80,6 +81,9 @@ Available commands:
 /shop         — list buyable dice
 /buy <item>   — buy an item from the shop
 /leaderboard  — show top scores
+/events       — list active global events
+/event claim <id> — claim an active event
+/event trash <id> — trash an active event
 /admin        — show admin-only commands if you are an admin
 /quit         — exit
 ```
@@ -101,6 +105,41 @@ The shop sells dice for coins:
 
 Current shop item keys are `starter_dice`, `regular_dice`, `lucky_dice`, and
 `cursed_dice`. Reroll tokens are not sold in the shop yet.
+
+## Events
+
+Events are global and frontend-agnostic: the core library stores event state and
+exposes claim/trash commands, while a Discord or CLI frontend decides how to
+render buttons/messages. The first implemented event is Random Item Spawn.
+
+```text
+/events            — list active events
+/event claim <id>  — claim an event reward
+/event trash <id>  — trash an active event
+```
+
+Admins can manually spawn the event for testing:
+
+```text
+/admin event spawn-random-item
+```
+
+Random item spawn is configurable in `mr-roller.toml`:
+
+```toml
+[events]
+enabled = true
+spawn_chance_per_check = 0.004
+max_active_events = 1
+
+[events.random_item_spawn]
+enabled = true
+timeout_seconds = 900
+
+[[events.random_item_spawn.items]]
+kind = "regular_dice"
+weight = 5
+```
 
 ## Database migrations
 

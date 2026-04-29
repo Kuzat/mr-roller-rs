@@ -14,3 +14,20 @@ bootstrap_admin_ids = [1]
 [database]
 # Omit or comment out `url` to use in-memory storage.
 url = "sqlite:mr-roller-test.db?mode=rwc"
+
+[events]
+enabled = true
+spawn_chance_per_check = 0.004
+max_active_events = 1
+
+[events.random_item_spawn]
+enabled = true
+timeout_seconds = 900
+
+[[events.random_item_spawn.items]]
+kind = "regular_dice"
+weight = 1
+
+[[events.random_item_spawn.items]]
+kind = "reroll_token"
+weight = 3

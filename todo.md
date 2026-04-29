@@ -19,6 +19,8 @@
 - [ ] Implement Shop and Event game systems
   - [x] First shop slice: list dice, buy dice with coins, dice rolls award coins
   - [x] Admin coin adjustment command
+  - [x] First event slice: global random item spawn with configurable weighted items
+  - [ ] Add background event scheduler/runner for Discord/server runtime
 - [ ] Implement partial item use / CompletedUseable workflow
 - [ ] Consider extracting `Game`/`Context` into a builder pattern
 
@@ -27,6 +29,9 @@
 - [ ] Set up continuous integration to run `cargo test` on each commit.
 
 ## Items — Ideas
-- [ ] More dice: ElementalDice, BoostedDice, etc.
+- [ ] More dice
+  - [ ] Better average dice with durability
+  - [ ] Dice that can be used to sabotage another player
+  - [ ] Dice where you can gamble the result to get better reward
 - [ ] More tokens: FreezeToken, StealToken
 - [ ] Item rarity system

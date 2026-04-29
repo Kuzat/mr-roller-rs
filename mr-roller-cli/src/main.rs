@@ -3,8 +3,9 @@ use std::{io, sync::Arc};
 use mr_roller::{
     command::{
         AdminAdjustCoinsCommand, AdminGiveItemCommand, AdminHelpCommand, AdminItemKind,
-        AdminSetAdminCommand, BuyItemCommand, InventoryCommand, LeaderboardCommand, ShopCommand,
-        ShopItemKind, StartCommand, UseItemCommand,
+        AdminSetAdminCommand, BuyItemCommand, ClaimEventCommand, InventoryCommand,
+        LeaderboardCommand, ListActiveEventsCommand, ShopCommand, ShopItemKind,
+        SpawnRandomItemEventCommand, StartCommand, TrashEventCommand, UseItemCommand,
     },
     config::Settings,
     game::{player::PlayerId, Game},
@@ -25,6 +26,8 @@ async fn main() {
     println!("  /shop        — list buyable items");
     println!("  /buy <item>  — buy an item from the shop");
     println!("  /leaderboard — show top scores");
+    println!("  /events      — list active events");
+    println!("  /event claim <id> | /event trash <id>");
     println!("  /admin       — show admin commands if you are an admin");
     println!("  /quit        — exit");
     println!();
@@ -80,11 +83,13 @@ async fn build_game(settings: &Settings) -> Game {
             Ok(store) => {
                 println!("Using SQLite store: {}", database_url);
                 let store = Arc::new(store);
-                return Game::with_bootstrap_admin_ids(
+                return Game::with_event_store(
+                    store.clone(),
                     store.clone(),
                     store.clone(),
                     store,
                     bootstrap_admin_ids,
+                    settings.events.clone(),
                 );
             }
             Err(err) => {
@@ -94,11 +99,13 @@ async fn build_game(settings: &Settings) -> Game {
         }
     }
 
-    Game::with_bootstrap_admin_ids(
+    Game::with_event_store(
         Arc::new(InMemoryPlayerStore::new()),
         Arc::new(InMemoryInventoryStore::new()),
         Arc::new(InMemoryLeaderboardStore::new()),
+        Arc::new(mr_roller::store::InMemoryEventStore::new()),
         bootstrap_admin_ids,
+        settings.events.clone(),
     )
 }
 
@@ -122,9 +129,13 @@ enum ParsedCommand {
     Shop,
     BuyItem(PlayerId, ShopItemKind),
     Leaderboard,
+    Events,
+    ClaimEvent(PlayerId, uuid::Uuid),
+    TrashEvent(PlayerId, uuid::Uuid),
     AdminHelp(PlayerId),
     AdminGiveItem(PlayerId, PlayerId, AdminItemKind),
     AdminAdjustCoins(PlayerId, PlayerId, i64),
+    AdminSpawnRandomItemEvent(PlayerId),
     AdminSetAdmin(PlayerId, PlayerId, bool),
 }
 
@@ -147,12 +158,26 @@ fn parse_command(input: &str, pid: PlayerId) -> Result<ParsedCommand, String> {
             Ok(ParsedCommand::BuyItem(pid, item))
         }
         Some("/leaderboard") | Some("/lb") => Ok(ParsedCommand::Leaderboard),
+        Some("/events") => Ok(ParsedCommand::Events),
+        Some("/event") => parse_event_command(&parts, pid),
         Some("/admin") => parse_admin_command(&parts, pid),
         Some(cmd) => Err(format!(
-            "Unknown command: {}. Try /start, /use, /inventory, /shop, /buy, /leaderboard, /admin.",
+            "Unknown command: {}. Try /start, /use, /inventory, /shop, /buy, /leaderboard, /events, /admin.",
             cmd
         )),
         None => Err("Empty command.".into()),
+    }
+}
+
+fn parse_event_command(parts: &[&str], pid: PlayerId) -> Result<ParsedCommand, String> {
+    let raw_id = parts
+        .get(2)
+        .ok_or("Usage: /event claim <id> or /event trash <id>")?;
+    let event_id = uuid::Uuid::parse_str(raw_id).map_err(|_| "Invalid event ID format.")?;
+    match parts.get(1).copied() {
+        Some("claim") => Ok(ParsedCommand::ClaimEvent(pid, event_id)),
+        Some("trash") => Ok(ParsedCommand::TrashEvent(pid, event_id)),
+        _ => Err("Usage: /event claim <id> or /event trash <id>".to_string()),
     }
 }
 
@@ -180,6 +205,12 @@ fn parse_admin_command(parts: &[&str], pid: PlayerId) -> Result<ParsedCommand, S
                 .map_err(|_| "Invalid coin amount.".to_string())?;
             Ok(ParsedCommand::AdminAdjustCoins(pid, target, amount))
         }
+        Some("event") => match parts.get(2).copied() {
+            Some("spawn-random-item") | Some("spawn") => {
+                Ok(ParsedCommand::AdminSpawnRandomItemEvent(pid))
+            }
+            _ => Err("Usage: /admin event spawn-random-item".to_string()),
+        },
         Some("set-admin") | Some("admin") => {
             let target = parse_player_id_arg(
                 parts.get(2),
@@ -192,7 +223,7 @@ fn parse_admin_command(parts: &[&str], pid: PlayerId) -> Result<ParsedCommand, S
             Ok(ParsedCommand::AdminSetAdmin(pid, target, is_admin))
         }
         Some(cmd) => Err(format!(
-            "Unknown admin command: {}. Try /admin, /admin give, /admin coins, or /admin set-admin.",
+            "Unknown admin command: {}. Try /admin, /admin give, /admin coins, /admin event, or /admin set-admin.",
             cmd
         )),
     }
@@ -245,6 +276,21 @@ impl ParsedCommand {
                 .await
             }
             ParsedCommand::Leaderboard => game.execute(LeaderboardCommand { limit: 10 }).await,
+            ParsedCommand::Events => game.execute(ListActiveEventsCommand).await,
+            ParsedCommand::ClaimEvent(pid, event_id) => {
+                game.execute(ClaimEventCommand {
+                    player_id: pid,
+                    event_id,
+                })
+                .await
+            }
+            ParsedCommand::TrashEvent(pid, event_id) => {
+                game.execute(TrashEventCommand {
+                    player_id: pid,
+                    event_id,
+                })
+                .await
+            }
             ParsedCommand::AdminHelp(pid) => {
                 game.execute(AdminHelpCommand { player_id: pid }).await
             }
@@ -263,6 +309,9 @@ impl ParsedCommand {
                     amount,
                 })
                 .await
+            }
+            ParsedCommand::AdminSpawnRandomItemEvent(admin_id) => {
+                game.execute(SpawnRandomItemEventCommand { admin_id }).await
             }
             ParsedCommand::AdminSetAdmin(admin_id, target_player_id, is_admin) => {
                 game.execute(AdminSetAdminCommand {
@@ -286,6 +335,7 @@ fn print_response(response: &mr_roller::response::Response) {
         ResponseKind::Inventory => "🎒",
         ResponseKind::Leaderboard => "🏆",
         ResponseKind::Shop => "🛒",
+        ResponseKind::Event => "🎉",
     };
 
     println!("  {} {}", icon, response.message);
@@ -324,6 +374,15 @@ fn print_response(response: &mr_roller::response::Response) {
                     }
                 }
             }
+            ResponseKind::Event => {
+                if let Some(events) = data.as_array() {
+                    for event in events {
+                        print_event(event);
+                    }
+                } else if data.is_object() {
+                    print_event(data);
+                }
+            }
             ResponseKind::DiceRoll => {
                 if let Some(roll) = data.get("roll").and_then(|v| v.as_u64()) {
                     println!("    Roll result: {}", roll);
@@ -332,4 +391,15 @@ fn print_response(response: &mr_roller::response::Response) {
             _ => {}
         }
     }
+}
+
+fn print_event(event: &serde_json::Value) {
+    let id = event["id"].as_str().unwrap_or("?");
+    let title = event["title"].as_str().unwrap_or("?");
+    let desc = event["description"].as_str().unwrap_or("");
+    let status = event["status"].as_str().unwrap_or("?");
+    let expires_at = event["expires_at"].as_str().unwrap_or("?");
+    println!("    [{}] {} — {}", id, title, status);
+    println!("        {}", desc);
+    println!("        expires at {}", expires_at);
 }

@@ -6,11 +6,15 @@ use uuid::Uuid;
 use crate::{
     errors::MrRollerError,
     game::{
+        event::{ActiveEvent, EventId, EventStatus},
         inventory::ItemId,
         item::Item,
         player::{Player, PlayerId},
     },
-    store::{inventory::InventoryStore, leaderboard::LeaderboardStore, player::PlayerStore},
+    store::{
+        event::EventStore, inventory::InventoryStore, leaderboard::LeaderboardStore,
+        player::PlayerStore,
+    },
 };
 
 use super::leaderboard::Score;
@@ -288,6 +292,89 @@ impl InventoryStore for SqliteStore {
 }
 
 #[async_trait]
+impl EventStore for SqliteStore {
+    async fn insert_event(&self, event: ActiveEvent) -> Result<(), MrRollerError> {
+        let event_json = serde_json::to_string(&event)?;
+        sqlx::query(
+            r#"
+            INSERT INTO active_events (id, kind, event_json, status, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(event.id.to_string())
+        .bind(event.title())
+        .bind(event_json)
+        .bind(event_status_key(&event.status))
+        .bind(event.created_at.to_rfc3339())
+        .bind(event.expires_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_event(&self, id: EventId) -> Result<ActiveEvent, MrRollerError> {
+        let row = sqlx::query("SELECT event_json FROM active_events WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| MrRollerError::Storage("Event not found".to_string()))?;
+
+        let event_json: String = row.try_get("event_json")?;
+        Ok(serde_json::from_str(&event_json)?)
+    }
+
+    async fn update_event(&self, event: ActiveEvent) -> Result<(), MrRollerError> {
+        let event_json = serde_json::to_string(&event)?;
+        let result = sqlx::query(
+            r#"
+            UPDATE active_events
+            SET event_json = ?, status = ?, expires_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(event_json)
+        .bind(event_status_key(&event.status))
+        .bind(event.expires_at.to_rfc3339())
+        .bind(event.id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(MrRollerError::Storage("Event not found".to_string()));
+        }
+        Ok(())
+    }
+
+    async fn list_events(&self) -> Result<Vec<ActiveEvent>, MrRollerError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT event_json
+            FROM active_events
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let event_json: String = row.try_get("event_json")?;
+                Ok(serde_json::from_str(&event_json)?)
+            })
+            .collect()
+    }
+}
+
+fn event_status_key(status: &EventStatus) -> &'static str {
+    match status {
+        EventStatus::Active => "active",
+        EventStatus::Claimed { .. } => "claimed",
+        EventStatus::Trashed { .. } => "trashed",
+        EventStatus::Expired => "expired",
+    }
+}
+
+#[async_trait]
 impl LeaderboardStore for SqliteStore {
     async fn get_scores(&self, limit: usize) -> Result<Vec<(PlayerId, Score)>, MrRollerError> {
         let rows = sqlx::query(
@@ -414,6 +501,25 @@ mod tests {
         store.remove_item(pid, token_id).await.unwrap();
         let items = store.list_items(pid).await.unwrap();
         assert_eq!(items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_event_insert_get_update_list() {
+        let store = store().await;
+        let mut event =
+            ActiveEvent::random_item_spawn(Item::BasicDice(BasicDice::regular_dice()), 900);
+        let event_id = event.id;
+
+        store.insert_event(event.clone()).await.unwrap();
+        assert_eq!(store.get_event(event_id).await.unwrap().id, event_id);
+
+        event.status = EventStatus::Expired;
+        store.update_event(event).await.unwrap();
+        assert_eq!(store.list_events().await.unwrap().len(), 1);
+        assert_eq!(
+            store.get_event(event_id).await.unwrap().status,
+            EventStatus::Expired
+        );
     }
 
     #[tokio::test]

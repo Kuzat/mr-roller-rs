@@ -1,3 +1,4 @@
+pub mod event;
 pub mod inventory;
 pub mod item;
 pub mod player;
@@ -6,10 +7,11 @@ use std::sync::Arc;
 
 use crate::{
     command::Command,
+    config::EventsConfig,
     cooldown::CooldownConfig,
     game::player::PlayerId,
     response::{Response, ResponseKind},
-    store::{InventoryStore, LeaderboardStore, PlayerStore},
+    store::{EventStore, InMemoryEventStore, InventoryStore, LeaderboardStore, PlayerStore},
 };
 
 /// Top-level game dispatcher. Frontends (CLI, Discord) only interact with
@@ -18,8 +20,10 @@ pub struct Game {
     players: Arc<dyn PlayerStore>,
     inventory: Arc<dyn InventoryStore>,
     leaderboard: Arc<dyn LeaderboardStore>,
+    events: Arc<dyn EventStore>,
     cooldown: CooldownConfig,
     bootstrap_admin_ids: Vec<PlayerId>,
+    event_config: EventsConfig,
 }
 
 impl Game {
@@ -44,8 +48,10 @@ impl Game {
             players,
             inventory,
             leaderboard,
+            events: Arc::new(InMemoryEventStore::new()),
             cooldown,
             bootstrap_admin_ids: Vec::new(),
+            event_config: EventsConfig::default(),
         }
     }
 
@@ -61,6 +67,25 @@ impl Game {
         game
     }
 
+    pub fn with_event_store(
+        players: Arc<dyn PlayerStore>,
+        inventory: Arc<dyn InventoryStore>,
+        leaderboard: Arc<dyn LeaderboardStore>,
+        events: Arc<dyn EventStore>,
+        bootstrap_admin_ids: Vec<PlayerId>,
+        event_config: EventsConfig,
+    ) -> Self {
+        Game {
+            players,
+            inventory,
+            leaderboard,
+            events,
+            cooldown: CooldownConfig::default(),
+            bootstrap_admin_ids,
+            event_config,
+        }
+    }
+
     /// Execute a command and return a `Response`. Errors from stores or
     /// validation are converted to `Response::Error` so frontends always
     /// receive a renderable result.
@@ -69,8 +94,10 @@ impl Game {
             players: self.players.as_ref(),
             inventory: self.inventory.as_ref(),
             leaderboard: self.leaderboard.as_ref(),
+            events: self.events.as_ref(),
             cooldown: &self.cooldown,
             bootstrap_admin_ids: &self.bootstrap_admin_ids,
+            event_config: &self.event_config,
         };
 
         match cmd.execute(&ctx).await {
