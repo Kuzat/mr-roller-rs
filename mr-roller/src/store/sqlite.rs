@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{sqlite::SqlitePoolOptions, Row, SqlitePool};
+use sqlx::{migrate::Migrator, sqlite::SqlitePoolOptions, Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::{
@@ -14,6 +14,8 @@ use crate::{
 };
 
 use super::leaderboard::Score;
+
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// SQLite-backed store implementing all current store traits.
 ///
@@ -62,23 +64,24 @@ impl SqliteStore {
         &self.pool
     }
 
-    /// Applies the current schema. Safe to call multiple times.
+    /// Applies database migrations. Safe to call multiple times.
     pub async fn migrate(&self) -> Result<(), MrRollerError> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS players (
-                id INTEGER PRIMARY KEY NOT NULL,
-                last_roll_at TEXT NULL,
-                luck INTEGER NOT NULL DEFAULT 0,
-                coins INTEGER NOT NULL DEFAULT 0,
-                xp INTEGER NOT NULL DEFAULT 0,
-                is_admin INTEGER NOT NULL DEFAULT 0
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
+        MIGRATOR
+            .run(&self.pool)
+            .await
+            .map_err(|e| MrRollerError::Storage(e.to_string()))?;
 
+        // Compatibility for databases created before sqlx migrations existed.
+        // The initial migration uses `CREATE TABLE IF NOT EXISTS`, so it will not
+        // add new columns to a pre-existing `players` table. Keep this small
+        // adapter until all local/dev DBs have been migrated past the old inline
+        // schema setup.
+        self.ensure_players_is_admin_column().await?;
+
+        Ok(())
+    }
+
+    async fn ensure_players_is_admin_column(&self) -> Result<(), MrRollerError> {
         let is_admin_column_count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
@@ -88,48 +91,12 @@ impl SqliteStore {
         )
         .fetch_one(&self.pool)
         .await?;
-        let has_is_admin = is_admin_column_count > 0;
 
-        if !has_is_admin {
+        if is_admin_column_count == 0 {
             sqlx::query("ALTER TABLE players ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
                 .execute(&self.pool)
                 .await?;
         }
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS inventory_items (
-                item_id TEXT PRIMARY KEY NOT NULL,
-                player_id INTEGER NOT NULL,
-                item_json TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE INDEX IF NOT EXISTS idx_inventory_items_player_id
-            ON inventory_items(player_id);
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS leaderboard_scores (
-                player_id INTEGER PRIMARY KEY NOT NULL,
-                xp INTEGER NOT NULL DEFAULT 0,
-                coins INTEGER NOT NULL DEFAULT 0
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
 
         Ok(())
     }
@@ -404,6 +371,17 @@ mod tests {
 
     async fn store() -> SqliteStore {
         SqliteStore::in_memory().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_sqlx_migrations_are_recorded() {
+        let store = store().await;
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+
+        assert!(count >= 1);
     }
 
     #[tokio::test]

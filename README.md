@@ -17,6 +17,7 @@ The library is built around three pluggable layers:
 | **Commands** (`StartCommand`, `UseItemCommand`, …) | Game actions | Add new commands without touching existing code |
 | **Items** (`define_items!` macro) | Dice, tokens, etc. | One struct + one macro line per new item |
 | **Cooldowns** (`CooldownConfig`) | Roll limits | Default: 24h cooldown, reset at midnight UTC |
+| **Migrations** (`mr-roller/migrations`) | SQLite schema changes | Managed by `sqlx::migrate!` |
 
 Frontends (CLI, Discord) only interact with `Game::execute(command)` — they never
 touch stores or game logic directly.
@@ -85,6 +86,12 @@ Dice rolls are limited by `CooldownConfig`. By default, players can roll once pe
 UTC day: after a dice roll, they are blocked until either midnight UTC passes or
 the configured cooldown duration elapses. Reroll tokens clear the player's roll
 cooldown and are consumed when used.
+
+## Database migrations
+
+SQLite schema changes are tracked in `mr-roller/migrations` and applied automatically
+when `SqliteStore` connects. Add future schema changes as new timestamped `.sql`
+files in that directory instead of editing existing migrations.
 
 ## Admin commands
 

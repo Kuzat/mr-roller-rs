@@ -1,0 +1,25 @@
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY NOT NULL,
+    last_roll_at TEXT NULL,
+    luck INTEGER NOT NULL DEFAULT 0,
+    coins INTEGER NOT NULL DEFAULT 0,
+    xp INTEGER NOT NULL DEFAULT 0,
+    is_admin INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS inventory_items (
+    item_id TEXT PRIMARY KEY NOT NULL,
+    player_id INTEGER NOT NULL,
+    item_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_items_player_id
+ON inventory_items(player_id);
+
+CREATE TABLE IF NOT EXISTS leaderboard_scores (
+    player_id INTEGER PRIMARY KEY NOT NULL,
+    xp INTEGER NOT NULL DEFAULT 0,
+    coins INTEGER NOT NULL DEFAULT 0
+);
