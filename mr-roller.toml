@@ -1,0 +1,16 @@
+# Mr Roller configuration.
+#
+# Environment overrides use config-rs' idiomatic nested key format:
+#   MR_ROLLER__DATABASE__URL='sqlite:mr-roller.db?mode=rwc'
+#   MR_ROLLER__ADMIN__BOOTSTRAP_ADMIN_IDS='1,42'
+#
+# To load a different config file, set:
+#   MR_ROLLER_CONFIG='./path/to/mr-roller.toml'
+
+[admin]
+# Player IDs that become admins when they run /start.
+bootstrap_admin_ids = [1]
+
+[database]
+# Omit or comment out `url` to use in-memory storage.
+url = "sqlite:mr-roller-test.db?mode=rwc"

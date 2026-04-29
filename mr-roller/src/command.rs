@@ -6,7 +6,11 @@ use crate::{
     errors::MrRollerError,
     game::{
         inventory::ItemId,
-        item::{dice::basic_dice::BasicDice, Item},
+        item::{
+            dice::{basic_dice::BasicDice, cursed_dice::CursedDice, lucky_dice::LuckyDice},
+            tokens::reroll_token::RerollToken,
+            Item,
+        },
         player::PlayerId,
     },
     response::{Response, ResponseKind},
@@ -19,6 +23,7 @@ pub struct Context<'a> {
     pub inventory: &'a dyn InventoryStore,
     pub leaderboard: &'a dyn LeaderboardStore,
     pub cooldown: &'a CooldownConfig,
+    pub bootstrap_admin_ids: &'a [PlayerId],
 }
 
 /// Every game action implements Command. The `Output` is converted into a
@@ -42,11 +47,24 @@ impl Command for StartCommand {
     type Output = Response;
 
     async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        let is_bootstrap_admin = is_bootstrap_admin(self.player_id, ctx.bootstrap_admin_ids);
+
         if ctx.players.contains(self.player_id).await? {
+            if is_bootstrap_admin {
+                let mut player = ctx.players.get(self.player_id).await?;
+                if !player.is_admin {
+                    player.is_admin = true;
+                    ctx.players.update(player).await?;
+                    return Ok(Response::success(
+                        "You are already in the game and have been promoted to admin.",
+                    ));
+                }
+            }
             return Ok(Response::error("You are already in the game."));
         }
 
-        let player = crate::game::player::Player::new(self.player_id);
+        let mut player = crate::game::player::Player::new(self.player_id);
+        player.is_admin = is_bootstrap_admin;
         ctx.players.insert(player).await?;
 
         // Grant starter dice
@@ -90,7 +108,9 @@ impl Command for UseItemCommand {
             // The token itself is consumed from inventory.
             player.last_roll_at = None;
             ctx.players.update(player).await?;
-            ctx.inventory.remove_item(self.player_id, self.item_id).await?;
+            ctx.inventory
+                .remove_item(self.player_id, self.item_id)
+                .await?;
             return Ok(item.handle());
         }
 
@@ -161,6 +181,79 @@ impl Command for InventoryCommand {
     }
 }
 
+// ── Admin helpers ──────────────────────────────────────────────────────────
+
+/// Item types that admin commands can grant to players.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdminItemKind {
+    StarterDice,
+    RegularDice,
+    LuckyDice,
+    CursedDice,
+    RerollToken,
+}
+
+impl AdminItemKind {
+    pub fn keys() -> &'static [&'static str] {
+        &[
+            "starter_dice",
+            "regular_dice",
+            "lucky_dice",
+            "cursed_dice",
+            "reroll_token",
+        ]
+    }
+}
+
+impl std::str::FromStr for AdminItemKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "starter" | "starter_dice" => Ok(Self::StarterDice),
+            "regular" | "regular_dice" | "basic" | "basic_dice" => Ok(Self::RegularDice),
+            "lucky" | "lucky_dice" => Ok(Self::LuckyDice),
+            "cursed" | "cursed_dice" => Ok(Self::CursedDice),
+            "reroll" | "reroll_token" | "token" => Ok(Self::RerollToken),
+            other => Err(format!(
+                "Unknown item '{}'. Available items: {}",
+                other,
+                Self::keys().join(", ")
+            )),
+        }
+    }
+}
+
+impl From<AdminItemKind> for Item {
+    fn from(kind: AdminItemKind) -> Self {
+        match kind {
+            AdminItemKind::StarterDice => Item::BasicDice(BasicDice::starter_dice()),
+            AdminItemKind::RegularDice => Item::BasicDice(BasicDice::regular_dice()),
+            AdminItemKind::LuckyDice => Item::LuckyDice(LuckyDice::new()),
+            AdminItemKind::CursedDice => Item::CursedDice(CursedDice::new()),
+            AdminItemKind::RerollToken => Item::RerollToken(RerollToken::new()),
+        }
+    }
+}
+
+fn is_bootstrap_admin(player_id: PlayerId, bootstrap_admin_ids: &[PlayerId]) -> bool {
+    bootstrap_admin_ids.contains(&player_id)
+}
+
+async fn require_admin(
+    ctx: &Context<'_>,
+    player_id: PlayerId,
+) -> Result<Option<Response>, MrRollerError> {
+    let player = ctx.players.get(player_id).await?;
+    if player.is_admin || is_bootstrap_admin(player_id, ctx.bootstrap_admin_ids) {
+        Ok(None)
+    } else {
+        Ok(Some(Response::error(
+            "You do not have permission to use admin commands.",
+        )))
+    }
+}
+
 // ── Leaderboard ────────────────────────────────────────────────────────────
 
 pub struct LeaderboardCommand {
@@ -186,20 +279,113 @@ impl Command for LeaderboardCommand {
             .collect();
 
         if entries.is_empty() {
-            Ok(Response::leaderboard("No scores yet.", serde_json::json!([])))
+            Ok(Response::leaderboard(
+                "No scores yet.",
+                serde_json::json!([]),
+            ))
         } else {
-            Ok(Response::leaderboard("Leaderboard:", serde_json::json!(entries)))
+            Ok(Response::leaderboard(
+                "Leaderboard:",
+                serde_json::json!(entries),
+            ))
         }
+    }
+}
+
+// ── AdminHelp ──────────────────────────────────────────────────────────────
+
+pub struct AdminHelpCommand {
+    pub player_id: PlayerId,
+}
+
+#[async_trait]
+impl Command for AdminHelpCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        if let Some(response) = require_admin(ctx, self.player_id).await? {
+            return Ok(response);
+        }
+
+        Ok(Response::success(format!(
+            "Admin commands: /admin give <player-id> <item>, /admin set-admin <player-id> <true|false>. Items: {}",
+            AdminItemKind::keys().join(", ")
+        )))
+    }
+}
+
+// ── AdminGiveItem ──────────────────────────────────────────────────────────
+
+pub struct AdminGiveItemCommand {
+    pub admin_id: PlayerId,
+    pub target_player_id: PlayerId,
+    pub item: AdminItemKind,
+}
+
+#[async_trait]
+impl Command for AdminGiveItemCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        if let Some(response) = require_admin(ctx, self.admin_id).await? {
+            return Ok(response);
+        }
+
+        if !ctx.players.contains(self.target_player_id).await? {
+            ctx.players
+                .insert(crate::game::player::Player::new(self.target_player_id))
+                .await?;
+        }
+
+        let item: Item = self.item.into();
+        let item_name = item.name().to_string();
+        let item_id = ctx.inventory.add_item(self.target_player_id, item).await?;
+
+        Ok(Response {
+            kind: ResponseKind::Success,
+            message: format!("Gave {} to player {}.", item_name, self.target_player_id.0),
+            data: Some(serde_json::json!({
+                "player_id": self.target_player_id.0,
+                "item_id": item_id.to_string(),
+                "item_name": item_name,
+            })),
+        })
+    }
+}
+
+// ── AdminSetAdmin ──────────────────────────────────────────────────────────
+
+pub struct AdminSetAdminCommand {
+    pub admin_id: PlayerId,
+    pub target_player_id: PlayerId,
+    pub is_admin: bool,
+}
+
+#[async_trait]
+impl Command for AdminSetAdminCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        if let Some(response) = require_admin(ctx, self.admin_id).await? {
+            return Ok(response);
+        }
+
+        let mut target = ctx.players.get(self.target_player_id).await?;
+        target.is_admin = self.is_admin;
+        ctx.players.update(target).await?;
+
+        Ok(Response::success(format!(
+            "Player {} is now {}admin.",
+            self.target_player_id.0,
+            if self.is_admin { "an " } else { "not an " }
+        )))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        game::item::tokens::reroll_token::RerollToken,
-        store::{InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore},
-    };
+    use crate::store::{InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore};
 
     fn make_context<'a>(
         players: &'a InMemoryPlayerStore,
@@ -212,6 +398,7 @@ mod tests {
             inventory,
             leaderboard,
             cooldown,
+            bootstrap_admin_ids: &[],
         }
     }
 
@@ -238,6 +425,92 @@ mod tests {
         // Has one item (starter dice)
         let items = inventory.list_items(PlayerId::new(1)).await.unwrap();
         assert_eq!(items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_start_bootstrap_admin() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let bootstrap_admin_ids = [PlayerId::new(7)];
+        let ctx = Context {
+            players: &players,
+            inventory: &inventory,
+            leaderboard: &leaderboard,
+            cooldown: &cooldown,
+            bootstrap_admin_ids: &bootstrap_admin_ids,
+        };
+
+        StartCommand {
+            player_id: PlayerId::new(7),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert!(players.get(PlayerId::new(7)).await.unwrap().is_admin);
+    }
+
+    #[tokio::test]
+    async fn test_start_promotes_existing_bootstrap_admin() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let bootstrap_admin_ids = [PlayerId::new(7)];
+        let ctx = Context {
+            players: &players,
+            inventory: &inventory,
+            leaderboard: &leaderboard,
+            cooldown: &cooldown,
+            bootstrap_admin_ids: &bootstrap_admin_ids,
+        };
+
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(7)))
+            .await
+            .unwrap();
+
+        let resp = StartCommand {
+            player_id: PlayerId::new(7),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        assert!(players.get(PlayerId::new(7)).await.unwrap().is_admin);
+    }
+
+    #[tokio::test]
+    async fn test_bootstrap_admin_can_use_admin_command_even_before_persisted_flag() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let bootstrap_admin_ids = [PlayerId::new(7)];
+        let ctx = Context {
+            players: &players,
+            inventory: &inventory,
+            leaderboard: &leaderboard,
+            cooldown: &cooldown,
+            bootstrap_admin_ids: &bootstrap_admin_ids,
+        };
+
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(7)))
+            .await
+            .unwrap();
+
+        let resp = AdminHelpCommand {
+            player_id: PlayerId::new(7),
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
     }
 
     #[tokio::test]
@@ -458,5 +731,130 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.kind, ResponseKind::Leaderboard);
+    }
+
+    // ── AdminCommand tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_admin_give_item_requires_admin() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(1)))
+            .await
+            .unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        let resp = AdminGiveItemCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(2),
+            item: AdminItemKind::RerollToken,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Error);
+        assert!(inventory
+            .list_items(PlayerId::new(2))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_admin_give_item_adds_item_to_target() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        let resp = AdminGiveItemCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(2),
+            item: AdminItemKind::LuckyDice,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        let items = inventory.list_items(PlayerId::new(2)).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0].1, Item::LuckyDice(_)));
+    }
+
+    #[tokio::test]
+    async fn test_admin_give_item_creates_missing_target() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+
+        let resp = AdminGiveItemCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(99),
+            item: AdminItemKind::RerollToken,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        assert!(players.contains(PlayerId::new(99)).await.unwrap());
+        assert_eq!(
+            inventory.list_items(PlayerId::new(99)).await.unwrap().len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn test_admin_set_admin_updates_target() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        let resp = AdminSetAdminCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(2),
+            is_admin: true,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        assert!(players.get(PlayerId::new(2)).await.unwrap().is_admin);
     }
 }

@@ -49,11 +49,25 @@ cargo run -p mr-roller-cli          # player ID 1 (default)
 cargo run -p mr-roller-cli -- 42    # player ID 42
 ```
 
-By default the CLI uses in-memory storage. To persist data in SQLite, set
-`MR_ROLLER_DB_URL`:
+By default the CLI loads `mr-roller.toml` from the current directory and uses
+in-memory storage unless a database URL is configured:
+
+```toml
+[database]
+url = "sqlite:mr-roller.db?mode=rwc"
+```
+
+You can also override config values with config-rs' nested environment variable
+format:
 
 ```bash
-MR_ROLLER_DB_URL='sqlite:mr-roller.db?mode=rwc' cargo run -p mr-roller-cli
+MR_ROLLER__DATABASE__URL='sqlite:mr-roller.db?mode=rwc' cargo run -p mr-roller-cli
+```
+
+To use a different config file, set `MR_ROLLER_CONFIG`:
+
+```bash
+MR_ROLLER_CONFIG='./config/local.toml' cargo run -p mr-roller-cli
 ```
 
 Available commands:
@@ -63,6 +77,7 @@ Available commands:
 /use <id>     — use an item from your inventory
 /inventory    — list your items
 /leaderboard  — show top scores
+/admin        — show admin-only commands if you are an admin
 /quit         — exit
 ```
 
@@ -70,6 +85,33 @@ Dice rolls are limited by `CooldownConfig`. By default, players can roll once pe
 UTC day: after a dice roll, they are blocked until either midnight UTC passes or
 the configured cooldown duration elapses. Reroll tokens clear the player's roll
 cooldown and are consumed when used.
+
+## Admin commands
+
+Players have a persistent `is_admin` flag. To bootstrap the first admins, add
+player IDs to `mr-roller.toml` before they run `/start`:
+
+```toml
+[admin]
+bootstrap_admin_ids = [1, 42]
+```
+
+Or override it from the environment:
+
+```bash
+MR_ROLLER__ADMIN__BOOTSTRAP_ADMIN_IDS='1,42' cargo run -p mr-roller-cli -- 1
+```
+
+Admins can use:
+
+```text
+/admin                                      — list admin commands and grantable items
+/admin give <player-id> <item>              — give an item to any player ID
+/admin set-admin <player-id> <true|false>   — grant or revoke admin status
+```
+
+Grantable item keys are `starter_dice`, `regular_dice`, `lucky_dice`,
+`cursed_dice`, and `reroll_token`.
 
 ## Library usage
 

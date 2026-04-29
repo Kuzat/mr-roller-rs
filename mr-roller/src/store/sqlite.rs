@@ -71,12 +71,30 @@ impl SqliteStore {
                 last_roll_at TEXT NULL,
                 luck INTEGER NOT NULL DEFAULT 0,
                 coins INTEGER NOT NULL DEFAULT 0,
-                xp INTEGER NOT NULL DEFAULT 0
+                xp INTEGER NOT NULL DEFAULT 0,
+                is_admin INTEGER NOT NULL DEFAULT 0
             );
             "#,
         )
         .execute(&self.pool)
         .await?;
+
+        let is_admin_column_count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)
+            FROM pragma_table_info('players')
+            WHERE name = 'is_admin'
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        let has_is_admin = is_admin_column_count > 0;
+
+        if !has_is_admin {
+            sqlx::query("ALTER TABLE players ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+                .execute(&self.pool)
+                .await?;
+        }
 
         sqlx::query(
             r#"
@@ -146,6 +164,7 @@ fn row_to_player(row: sqlx::sqlite::SqliteRow) -> Result<Player, MrRollerError> 
         luck: row.try_get::<i64, _>("luck")? as u64,
         coins: row.try_get::<i64, _>("coins")? as u64,
         xp: row.try_get::<i64, _>("xp")? as u64,
+        is_admin: row.try_get::<i64, _>("is_admin")? != 0,
     })
 }
 
@@ -154,7 +173,7 @@ impl PlayerStore for SqliteStore {
     async fn get(&self, id: PlayerId) -> Result<Player, MrRollerError> {
         let row = sqlx::query(
             r#"
-            SELECT id, last_roll_at, luck, coins, xp
+            SELECT id, last_roll_at, luck, coins, xp, is_admin
             FROM players
             WHERE id = ?
             "#,
@@ -174,8 +193,8 @@ impl PlayerStore for SqliteStore {
 
         sqlx::query(
             r#"
-            INSERT INTO players (id, last_roll_at, luck, coins, xp)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO players (id, last_roll_at, luck, coins, xp, is_admin)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(player_id_to_i64(player.id))
@@ -183,6 +202,7 @@ impl PlayerStore for SqliteStore {
         .bind(player.luck as i64)
         .bind(player.coins as i64)
         .bind(player.xp as i64)
+        .bind(if player.is_admin { 1_i64 } else { 0_i64 })
         .execute(&self.pool)
         .await?;
 
@@ -212,7 +232,7 @@ impl PlayerStore for SqliteStore {
     async fn all(&self) -> Result<Vec<Player>, MrRollerError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, last_roll_at, luck, coins, xp
+            SELECT id, last_roll_at, luck, coins, xp, is_admin
             FROM players
             ORDER BY id ASC
             "#,
@@ -227,7 +247,7 @@ impl PlayerStore for SqliteStore {
         let result = sqlx::query(
             r#"
             UPDATE players
-            SET last_roll_at = ?, luck = ?, coins = ?, xp = ?
+            SET last_roll_at = ?, luck = ?, coins = ?, xp = ?, is_admin = ?
             WHERE id = ?
             "#,
         )
@@ -235,6 +255,7 @@ impl PlayerStore for SqliteStore {
         .bind(player.luck as i64)
         .bind(player.coins as i64)
         .bind(player.xp as i64)
+        .bind(if player.is_admin { 1_i64 } else { 0_i64 })
         .bind(player_id_to_i64(player.id))
         .execute(&self.pool)
         .await?;
@@ -284,11 +305,7 @@ impl InventoryStore for SqliteStore {
         Ok(id)
     }
 
-    async fn remove_item(
-        &self,
-        player_id: PlayerId,
-        item_id: ItemId,
-    ) -> Result<(), MrRollerError> {
+    async fn remove_item(&self, player_id: PlayerId, item_id: ItemId) -> Result<(), MrRollerError> {
         let result = sqlx::query(
             r#"
             DELETE FROM inventory_items
@@ -323,8 +340,8 @@ impl InventoryStore for SqliteStore {
             .map(|row| {
                 let id: String = row.try_get("item_id")?;
                 let item_json: String = row.try_get("item_json")?;
-                let item_id = Uuid::parse_str(&id)
-                    .map_err(|e| MrRollerError::Storage(e.to_string()))?;
+                let item_id =
+                    Uuid::parse_str(&id).map_err(|e| MrRollerError::Storage(e.to_string()))?;
                 let item = serde_json::from_str(&item_json)?;
                 Ok((item_id, item))
             })
@@ -360,11 +377,7 @@ impl LeaderboardStore for SqliteStore {
             .collect()
     }
 
-    async fn update_score(
-        &self,
-        player_id: PlayerId,
-        score: Score,
-    ) -> Result<(), MrRollerError> {
+    async fn update_score(&self, player_id: PlayerId, score: Score) -> Result<(), MrRollerError> {
         sqlx::query(
             r#"
             INSERT INTO leaderboard_scores (player_id, xp, coins)
@@ -404,7 +417,10 @@ mod tests {
         assert_eq!(got.id, PlayerId::new(1));
         assert_eq!(got.xp, 10);
 
-        let duplicate = store.insert(Player::new(PlayerId::new(1))).await.unwrap_err();
+        let duplicate = store
+            .insert(Player::new(PlayerId::new(1)))
+            .await
+            .unwrap_err();
         assert!(matches!(duplicate, MrRollerError::PlayerAlreadyInGame));
 
         player.xp = 99;
@@ -434,8 +450,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(store.get_item(pid, dice_id).await.unwrap(), Item::BasicDice(_)));
-        assert!(matches!(store.get_item(pid, token_id).await.unwrap(), Item::RerollToken(_)));
+        assert!(matches!(
+            store.get_item(pid, dice_id).await.unwrap(),
+            Item::BasicDice(_)
+        ));
+        assert!(matches!(
+            store.get_item(pid, token_id).await.unwrap(),
+            Item::RerollToken(_)
+        ));
 
         let items = store.list_items(pid).await.unwrap();
         assert_eq!(items.len(), 2);

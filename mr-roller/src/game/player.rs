@@ -21,6 +21,8 @@ pub struct Player {
     pub luck: u64,
     pub coins: u64,
     pub xp: u64,
+    /// Whether this player may execute admin-only commands.
+    pub is_admin: bool,
 }
 
 impl Player {
@@ -31,6 +33,7 @@ impl Player {
             luck: 0,
             coins: 0,
             xp: 0,
+            is_admin: false,
         }
     }
 }
@@ -53,5 +56,6 @@ mod tests {
         assert_eq!(player.coins, 0);
         assert_eq!(player.xp, 0);
         assert!(player.last_roll_at.is_none());
+        assert!(!player.is_admin);
     }
 }

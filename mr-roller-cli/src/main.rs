@@ -1,24 +1,28 @@
 use std::{io, sync::Arc};
 
 use mr_roller::{
-    command::{InventoryCommand, LeaderboardCommand, StartCommand, UseItemCommand},
+    command::{
+        AdminGiveItemCommand, AdminHelpCommand, AdminItemKind, AdminSetAdminCommand,
+        InventoryCommand, LeaderboardCommand, StartCommand, UseItemCommand,
+    },
+    config::Settings,
     game::{player::PlayerId, Game},
     response::ResponseKind,
-    store::{
-        InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore, SqliteStore,
-    },
+    store::{InMemoryInventoryStore, InMemoryLeaderboardStore, InMemoryPlayerStore, SqliteStore},
 };
 
 #[tokio::main]
 async fn main() {
     let player_id = parse_player_id();
-    let game = build_game().await;
+    let settings = Settings::load().expect("failed to load Mr Roller configuration");
+    let game = build_game(&settings).await;
 
     println!("🎲 Mr Roller CLI");
     println!("  /start       — join the game");
     println!("  /use <id>    — use an item from inventory");
     println!("  /inventory   — list your items");
     println!("  /leaderboard — show top scores");
+    println!("  /admin       — show admin commands if you are an admin");
     println!("  /quit        — exit");
     println!();
 
@@ -60,13 +64,25 @@ fn parse_player_id() -> PlayerId {
     PlayerId::new(1)
 }
 
-async fn build_game() -> Game {
-    if let Ok(database_url) = std::env::var("MR_ROLLER_DB_URL") {
-        match SqliteStore::connect(&database_url).await {
+async fn build_game(settings: &Settings) -> Game {
+    let bootstrap_admin_ids = settings.bootstrap_admin_player_ids();
+
+    if let Some(database_url) = settings
+        .database
+        .url
+        .as_deref()
+        .filter(|url| !url.is_empty())
+    {
+        match SqliteStore::connect(database_url).await {
             Ok(store) => {
                 println!("Using SQLite store: {}", database_url);
                 let store = Arc::new(store);
-                return Game::new(store.clone(), store.clone(), store);
+                return Game::with_bootstrap_admin_ids(
+                    store.clone(),
+                    store.clone(),
+                    store,
+                    bootstrap_admin_ids,
+                );
             }
             Err(err) => {
                 eprintln!("Failed to open SQLite store: {}", err);
@@ -75,10 +91,11 @@ async fn build_game() -> Game {
         }
     }
 
-    Game::new(
+    Game::with_bootstrap_admin_ids(
         Arc::new(InMemoryPlayerStore::new()),
         Arc::new(InMemoryInventoryStore::new()),
         Arc::new(InMemoryLeaderboardStore::new()),
+        bootstrap_admin_ids,
     )
 }
 
@@ -100,6 +117,9 @@ enum ParsedCommand {
     UseItem(PlayerId, uuid::Uuid),
     Inventory(PlayerId),
     Leaderboard,
+    AdminHelp(PlayerId),
+    AdminGiveItem(PlayerId, PlayerId, AdminItemKind),
+    AdminSetAdmin(PlayerId, PlayerId, bool),
 }
 
 fn parse_command(input: &str, pid: PlayerId) -> Result<ParsedCommand, String> {
@@ -113,8 +133,62 @@ fn parse_command(input: &str, pid: PlayerId) -> Result<ParsedCommand, String> {
         }
         Some("/inventory") | Some("/inv") => Ok(ParsedCommand::Inventory(pid)),
         Some("/leaderboard") | Some("/lb") => Ok(ParsedCommand::Leaderboard),
-        Some(cmd) => Err(format!("Unknown command: {}. Try /start, /use, /inventory, /leaderboard.", cmd)),
+        Some("/admin") => parse_admin_command(&parts, pid),
+        Some(cmd) => Err(format!(
+            "Unknown command: {}. Try /start, /use, /inventory, /leaderboard, /admin.",
+            cmd
+        )),
         None => Err("Empty command.".into()),
+    }
+}
+
+fn parse_admin_command(parts: &[&str], pid: PlayerId) -> Result<ParsedCommand, String> {
+    match parts.get(1).copied() {
+        None | Some("help") => Ok(ParsedCommand::AdminHelp(pid)),
+        Some("give") => {
+            let target =
+                parse_player_id_arg(parts.get(2), "Usage: /admin give <player-id> <item>")?;
+            let item = parts
+                .get(3)
+                .ok_or("Usage: /admin give <player-id> <item>")?
+                .parse::<AdminItemKind>()?;
+            Ok(ParsedCommand::AdminGiveItem(pid, target, item))
+        }
+        Some("set-admin") | Some("admin") => {
+            let target = parse_player_id_arg(
+                parts.get(2),
+                "Usage: /admin set-admin <player-id> <true|false>",
+            )?;
+            let is_admin = parse_bool_arg(
+                parts.get(3),
+                "Usage: /admin set-admin <player-id> <true|false>",
+            )?;
+            Ok(ParsedCommand::AdminSetAdmin(pid, target, is_admin))
+        }
+        Some(cmd) => Err(format!(
+            "Unknown admin command: {}. Try /admin, /admin give, or /admin set-admin.",
+            cmd
+        )),
+    }
+}
+
+fn parse_player_id_arg(value: Option<&&str>, usage: &str) -> Result<PlayerId, String> {
+    value
+        .ok_or(usage.to_string())?
+        .parse::<u64>()
+        .map(PlayerId::new)
+        .map_err(|_| "Invalid player ID.".to_string())
+}
+
+fn parse_bool_arg(value: Option<&&str>, usage: &str) -> Result<bool, String> {
+    match value
+        .ok_or(usage.to_string())?
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "true" | "yes" | "1" | "on" => Ok(true),
+        "false" | "no" | "0" | "off" => Ok(false),
+        _ => Err("Expected true or false.".to_string()),
     }
 }
 
@@ -137,6 +211,25 @@ impl ParsedCommand {
                 game.execute(InventoryCommand { player_id: pid }).await
             }
             ParsedCommand::Leaderboard => game.execute(LeaderboardCommand { limit: 10 }).await,
+            ParsedCommand::AdminHelp(pid) => {
+                game.execute(AdminHelpCommand { player_id: pid }).await
+            }
+            ParsedCommand::AdminGiveItem(admin_id, target_player_id, item) => {
+                game.execute(AdminGiveItemCommand {
+                    admin_id,
+                    target_player_id,
+                    item,
+                })
+                .await
+            }
+            ParsedCommand::AdminSetAdmin(admin_id, target_player_id, is_admin) => {
+                game.execute(AdminSetAdminCommand {
+                    admin_id,
+                    target_player_id,
+                    is_admin,
+                })
+                .await
+            }
         }
     }
 }
@@ -173,13 +266,7 @@ fn print_response(response: &mr_roller::response::Response) {
                         let pid = entry["player_id"].as_u64().unwrap_or(0);
                         let xp = entry["xp"].as_u64().unwrap_or(0);
                         let coins = entry["coins"].as_u64().unwrap_or(0);
-                        println!(
-                            "    {}. Player {} — {} XP, {} coins",
-                            i + 1,
-                            pid,
-                            xp,
-                            coins
-                        );
+                        println!("    {}. Player {} — {} XP, {} coins", i + 1, pid, xp, coins);
                     }
                 }
             }

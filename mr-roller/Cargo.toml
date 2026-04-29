@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 chrono = { version = "0.4.31", features = ["serde"] }
+config = "0.14"
 indoc = "2.0.4"
 rand = "0.8.5"
 serde = { version = "1", features = ["derive"] }
