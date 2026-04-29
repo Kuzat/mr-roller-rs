@@ -69,36 +69,7 @@ impl SqliteStore {
         MIGRATOR
             .run(&self.pool)
             .await
-            .map_err(|e| MrRollerError::Storage(e.to_string()))?;
-
-        // Compatibility for databases created before sqlx migrations existed.
-        // The initial migration uses `CREATE TABLE IF NOT EXISTS`, so it will not
-        // add new columns to a pre-existing `players` table. Keep this small
-        // adapter until all local/dev DBs have been migrated past the old inline
-        // schema setup.
-        self.ensure_players_is_admin_column().await?;
-
-        Ok(())
-    }
-
-    async fn ensure_players_is_admin_column(&self) -> Result<(), MrRollerError> {
-        let is_admin_column_count: i64 = sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM pragma_table_info('players')
-            WHERE name = 'is_admin'
-            "#,
-        )
-        .fetch_one(&self.pool)
-        .await?;
-
-        if is_admin_column_count == 0 {
-            sqlx::query("ALTER TABLE players ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
-                .execute(&self.pool)
-                .await?;
-        }
-
-        Ok(())
+            .map_err(|e| MrRollerError::Storage(e.to_string()))
     }
 }
 
