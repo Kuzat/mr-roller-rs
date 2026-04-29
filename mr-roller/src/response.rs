@@ -18,6 +18,7 @@ pub enum ResponseKind {
     DiceRoll,
     Inventory,
     Leaderboard,
+    Shop,
 }
 
 impl Response {
@@ -56,6 +57,14 @@ impl Response {
     pub fn leaderboard(message: impl Into<String>, entries: serde_json::Value) -> Self {
         Response {
             kind: ResponseKind::Leaderboard,
+            message: message.into(),
+            data: Some(entries),
+        }
+    }
+
+    pub fn shop(message: impl Into<String>, entries: serde_json::Value) -> Self {
+        Response {
+            kind: ResponseKind::Shop,
             message: message.into(),
             data: Some(entries),
         }

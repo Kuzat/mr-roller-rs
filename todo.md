@@ -17,6 +17,8 @@
 - [x] Add `serde` derives to items for database serialization
 - [x] Phase 6: Database-backed stores (SQLite via sqlx)
 - [ ] Implement Shop and Event game systems
+  - [x] First shop slice: list dice, buy dice with coins, dice rolls award coins
+  - [x] Admin coin adjustment command
 - [ ] Implement partial item use / CompletedUseable workflow
 - [ ] Consider extracting `Game`/`Context` into a builder pattern
 

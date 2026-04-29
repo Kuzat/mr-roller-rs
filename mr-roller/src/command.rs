@@ -14,7 +14,7 @@ use crate::{
         player::PlayerId,
     },
     response::{Response, ResponseKind},
-    store::{InventoryStore, LeaderboardStore, PlayerStore},
+    store::{leaderboard::Score, InventoryStore, LeaderboardStore, PlayerStore},
 };
 
 /// Context provides command handlers with access to all persistent stores.
@@ -123,6 +123,7 @@ impl Command for UseItemCommand {
             if let Some(data) = &response.data {
                 if let Some(roll) = data.get("roll").and_then(|v| v.as_u64()) {
                     player.xp += roll;
+                    player.coins += roll;
                 }
             }
 
@@ -130,7 +131,7 @@ impl Command for UseItemCommand {
             ctx.leaderboard
                 .update_score(
                     self.player_id,
-                    crate::store::leaderboard::Score {
+                    Score {
                         xp: player.xp,
                         coins: player.coins,
                     },
@@ -178,6 +179,160 @@ impl Command for InventoryCommand {
                 serde_json::json!(item_list),
             ))
         }
+    }
+}
+
+// ── Shop helpers ───────────────────────────────────────────────────────────
+
+/// Item types players can buy from the shop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShopItemKind {
+    StarterDice,
+    RegularDice,
+    LuckyDice,
+    CursedDice,
+}
+
+pub struct ShopCatalogEntry {
+    pub key: &'static str,
+    pub item: ShopItemKind,
+    pub price: u64,
+}
+
+const SHOP_CATALOG: &[ShopCatalogEntry] = &[
+    ShopCatalogEntry {
+        key: "starter_dice",
+        item: ShopItemKind::StarterDice,
+        price: 5,
+    },
+    ShopCatalogEntry {
+        key: "regular_dice",
+        item: ShopItemKind::RegularDice,
+        price: 25,
+    },
+    ShopCatalogEntry {
+        key: "lucky_dice",
+        item: ShopItemKind::LuckyDice,
+        price: 100,
+    },
+    ShopCatalogEntry {
+        key: "cursed_dice",
+        item: ShopItemKind::CursedDice,
+        price: 50,
+    },
+];
+
+impl ShopItemKind {
+    pub fn keys() -> Vec<&'static str> {
+        SHOP_CATALOG.iter().map(|entry| entry.key).collect()
+    }
+
+    pub fn catalog_entry(&self) -> &'static ShopCatalogEntry {
+        SHOP_CATALOG
+            .iter()
+            .find(|entry| entry.item == *self)
+            .expect("shop item must exist in catalog")
+    }
+}
+
+impl std::str::FromStr for ShopItemKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+            "starter" | "starter_dice" => Ok(Self::StarterDice),
+            "regular" | "regular_dice" | "basic" | "basic_dice" => Ok(Self::RegularDice),
+            "lucky" | "lucky_dice" => Ok(Self::LuckyDice),
+            "cursed" | "cursed_dice" => Ok(Self::CursedDice),
+            other => Err(format!(
+                "Unknown shop item '{}'. Available items: {}",
+                other,
+                Self::keys().join(", ")
+            )),
+        }
+    }
+}
+
+impl From<ShopItemKind> for Item {
+    fn from(kind: ShopItemKind) -> Self {
+        match kind {
+            ShopItemKind::StarterDice => Item::BasicDice(BasicDice::starter_dice()),
+            ShopItemKind::RegularDice => Item::BasicDice(BasicDice::regular_dice()),
+            ShopItemKind::LuckyDice => Item::LuckyDice(LuckyDice::new()),
+            ShopItemKind::CursedDice => Item::CursedDice(CursedDice::new()),
+        }
+    }
+}
+
+fn leaderboard_score(player: &crate::game::player::Player) -> Score {
+    Score {
+        xp: player.xp,
+        coins: player.coins,
+    }
+}
+
+// ── Shop ───────────────────────────────────────────────────────────────────
+
+pub struct ShopCommand;
+
+#[async_trait]
+impl Command for ShopCommand {
+    type Output = Response;
+
+    async fn execute(self, _ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        let entries: Vec<serde_json::Value> = SHOP_CATALOG
+            .iter()
+            .map(|entry| {
+                let item: Item = entry.item.into();
+                serde_json::json!({
+                    "key": entry.key,
+                    "name": item.name(),
+                    "description": item.description(),
+                    "price": entry.price,
+                })
+            })
+            .collect();
+
+        Ok(Response::shop("Shop:", serde_json::json!(entries)))
+    }
+}
+
+// ── BuyItem ────────────────────────────────────────────────────────────────
+
+pub struct BuyItemCommand {
+    pub player_id: PlayerId,
+    pub item: ShopItemKind,
+}
+
+#[async_trait]
+impl Command for BuyItemCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        let mut player = ctx.players.get(self.player_id).await?;
+        let catalog_entry = self.item.catalog_entry();
+
+        if player.coins < catalog_entry.price {
+            return Ok(Response::error(format!(
+                "You need {} coins to buy {} but only have {}.",
+                catalog_entry.price, catalog_entry.key, player.coins
+            )));
+        }
+
+        let item: Item = self.item.into();
+        let item_name = item.name().to_string();
+        player.coins -= catalog_entry.price;
+
+        ctx.players.update(player.clone()).await?;
+        ctx.inventory.add_item(self.player_id, item).await?;
+        ctx.leaderboard
+            .update_score(self.player_id, leaderboard_score(&player))
+            .await?;
+
+        Ok(Response::success(format!(
+            "Bought {} for {} coins. You now have {} coins.",
+            item_name, catalog_entry.price, player.coins
+        )))
     }
 }
 
@@ -308,7 +463,7 @@ impl Command for AdminHelpCommand {
         }
 
         Ok(Response::success(format!(
-            "Admin commands: /admin give <player-id> <item>, /admin set-admin <player-id> <true|false>. Items: {}",
+            "Admin commands: /admin give <player-id> <item>, /admin coins <player-id> <amount>, /admin set-admin <player-id> <true|false>. Items: {}",
             AdminItemKind::keys().join(", ")
         )))
     }
@@ -350,6 +505,49 @@ impl Command for AdminGiveItemCommand {
                 "item_name": item_name,
             })),
         })
+    }
+}
+
+// ── AdminAdjustCoins ───────────────────────────────────────────────────────
+
+pub struct AdminAdjustCoinsCommand {
+    pub admin_id: PlayerId,
+    pub target_player_id: PlayerId,
+    pub amount: i64,
+}
+
+#[async_trait]
+impl Command for AdminAdjustCoinsCommand {
+    type Output = Response;
+
+    async fn execute(self, ctx: &Context<'_>) -> Result<Response, MrRollerError> {
+        if let Some(response) = require_admin(ctx, self.admin_id).await? {
+            return Ok(response);
+        }
+
+        let mut target = ctx.players.get(self.target_player_id).await?;
+        if self.amount < 0 {
+            let amount_to_remove = self.amount.unsigned_abs();
+            if target.coins < amount_to_remove {
+                return Ok(Response::error(format!(
+                    "Player {} only has {} coins.",
+                    self.target_player_id.0, target.coins
+                )));
+            }
+            target.coins -= amount_to_remove;
+        } else {
+            target.coins += self.amount as u64;
+        }
+
+        ctx.players.update(target.clone()).await?;
+        ctx.leaderboard
+            .update_score(self.target_player_id, leaderboard_score(&target))
+            .await?;
+
+        Ok(Response::success(format!(
+            "Player {} now has {} coins.",
+            self.target_player_id.0, target.coins
+        )))
     }
 }
 
@@ -572,7 +770,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(resp.kind, ResponseKind::DiceRoll);
-        assert!(resp.data.is_some());
+        let data = resp.data.as_ref().unwrap();
+
+        let player = players.get(PlayerId::new(1)).await.unwrap();
+        let roll = data["roll"].as_u64().unwrap();
+        assert_eq!(player.coins, roll);
+        assert_eq!(player.xp, roll);
 
         // Leaderboard should have an entry
         let scores = leaderboard.get_scores(10).await.unwrap();
@@ -733,6 +936,81 @@ mod tests {
         assert_eq!(resp.kind, ResponseKind::Leaderboard);
     }
 
+    // ── ShopCommand tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_shop_lists_dice_without_reroll_token() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let resp = ShopCommand.execute(&ctx).await.unwrap();
+        assert_eq!(resp.kind, ResponseKind::Shop);
+        let items = resp.data.unwrap().as_array().cloned().unwrap();
+        assert!(items.iter().any(|item| item["key"] == "regular_dice"));
+        assert!(items.iter().any(|item| item["key"] == "lucky_dice"));
+        assert!(items.iter().any(|item| item["key"] == "cursed_dice"));
+        assert!(!items.iter().any(|item| item["key"] == "reroll_token"));
+    }
+
+    #[tokio::test]
+    async fn test_buy_item_spends_coins_and_adds_item() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let mut player = crate::game::player::Player::new(PlayerId::new(1));
+        player.coins = 100;
+        players.insert(player).await.unwrap();
+
+        let resp = BuyItemCommand {
+            player_id: PlayerId::new(1),
+            item: ShopItemKind::LuckyDice,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        assert_eq!(players.get(PlayerId::new(1)).await.unwrap().coins, 0);
+        let items = inventory.list_items(PlayerId::new(1)).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0].1, Item::LuckyDice(_)));
+    }
+
+    #[tokio::test]
+    async fn test_buy_item_requires_enough_coins() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(1)))
+            .await
+            .unwrap();
+
+        let resp = BuyItemCommand {
+            player_id: PlayerId::new(1),
+            item: ShopItemKind::LuckyDice,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Error);
+        assert!(inventory
+            .list_items(PlayerId::new(1))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
     // ── AdminCommand tests ──────────────────────────────────────────────
 
     #[tokio::test]
@@ -827,6 +1105,73 @@ mod tests {
             inventory.list_items(PlayerId::new(99)).await.unwrap().len(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn test_admin_adjust_coins_adds_and_removes_coins() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        AdminAdjustCoinsCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(2),
+            amount: 25,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        let resp = AdminAdjustCoinsCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(2),
+            amount: -10,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        assert_eq!(players.get(PlayerId::new(2)).await.unwrap().coins, 15);
+    }
+
+    #[tokio::test]
+    async fn test_admin_adjust_coins_cannot_remove_more_than_player_has() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+
+        let mut admin = crate::game::player::Player::new(PlayerId::new(1));
+        admin.is_admin = true;
+        players.insert(admin).await.unwrap();
+        players
+            .insert(crate::game::player::Player::new(PlayerId::new(2)))
+            .await
+            .unwrap();
+
+        let resp = AdminAdjustCoinsCommand {
+            admin_id: PlayerId::new(1),
+            target_player_id: PlayerId::new(2),
+            amount: -1,
+        }
+        .execute(&ctx)
+        .await
+        .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Error);
+        assert_eq!(players.get(PlayerId::new(2)).await.unwrap().coins, 0);
     }
 
     #[tokio::test]

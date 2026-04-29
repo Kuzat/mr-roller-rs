@@ -77,6 +77,8 @@ Available commands:
 /start        — join the game, receive a starter dice
 /use <id>     — use an item from your inventory
 /inventory    — list your items
+/shop         — list buyable dice
+/buy <item>   — buy an item from the shop
 /leaderboard  — show top scores
 /admin        — show admin-only commands if you are an admin
 /quit         — exit
@@ -84,8 +86,21 @@ Available commands:
 
 Dice rolls are limited by `CooldownConfig`. By default, players can roll once per
 UTC day: after a dice roll, they are blocked until either midnight UTC passes or
-the configured cooldown duration elapses. Reroll tokens clear the player's roll
-cooldown and are consumed when used.
+the configured cooldown duration elapses. Dice rolls award XP and coins equal to
+the roll result. Reroll tokens clear the player's roll cooldown and are consumed
+when used.
+
+## Shop
+
+The shop sells dice for coins:
+
+```text
+/shop        — list buyable dice and prices
+/buy <item>  — buy a shop item
+```
+
+Current shop item keys are `starter_dice`, `regular_dice`, `lucky_dice`, and
+`cursed_dice`. Reroll tokens are not sold in the shop yet.
 
 ## Database migrations
 
@@ -114,6 +129,7 @@ Admins can use:
 ```text
 /admin                                      — list admin commands and grantable items
 /admin give <player-id> <item>              — give an item to any player ID
+/admin coins <player-id> <amount>           — add or remove coins, e.g. 50 or -10
 /admin set-admin <player-id> <true|false>   — grant or revoke admin status
 ```
 

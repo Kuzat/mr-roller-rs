@@ -2,8 +2,9 @@ use std::{io, sync::Arc};
 
 use mr_roller::{
     command::{
-        AdminGiveItemCommand, AdminHelpCommand, AdminItemKind, AdminSetAdminCommand,
-        InventoryCommand, LeaderboardCommand, StartCommand, UseItemCommand,
+        AdminAdjustCoinsCommand, AdminGiveItemCommand, AdminHelpCommand, AdminItemKind,
+        AdminSetAdminCommand, BuyItemCommand, InventoryCommand, LeaderboardCommand, ShopCommand,
+        ShopItemKind, StartCommand, UseItemCommand,
     },
     config::Settings,
     game::{player::PlayerId, Game},
@@ -21,6 +22,8 @@ async fn main() {
     println!("  /start       — join the game");
     println!("  /use <id>    — use an item from inventory");
     println!("  /inventory   — list your items");
+    println!("  /shop        — list buyable items");
+    println!("  /buy <item>  — buy an item from the shop");
     println!("  /leaderboard — show top scores");
     println!("  /admin       — show admin commands if you are an admin");
     println!("  /quit        — exit");
@@ -116,9 +119,12 @@ enum ParsedCommand {
     Start(PlayerId),
     UseItem(PlayerId, uuid::Uuid),
     Inventory(PlayerId),
+    Shop,
+    BuyItem(PlayerId, ShopItemKind),
     Leaderboard,
     AdminHelp(PlayerId),
     AdminGiveItem(PlayerId, PlayerId, AdminItemKind),
+    AdminAdjustCoins(PlayerId, PlayerId, i64),
     AdminSetAdmin(PlayerId, PlayerId, bool),
 }
 
@@ -132,10 +138,18 @@ fn parse_command(input: &str, pid: PlayerId) -> Result<ParsedCommand, String> {
             Ok(ParsedCommand::UseItem(pid, item_id))
         }
         Some("/inventory") | Some("/inv") => Ok(ParsedCommand::Inventory(pid)),
+        Some("/shop") => Ok(ParsedCommand::Shop),
+        Some("/buy") => {
+            let item = parts
+                .get(1)
+                .ok_or("Usage: /buy <item>")?
+                .parse::<ShopItemKind>()?;
+            Ok(ParsedCommand::BuyItem(pid, item))
+        }
         Some("/leaderboard") | Some("/lb") => Ok(ParsedCommand::Leaderboard),
         Some("/admin") => parse_admin_command(&parts, pid),
         Some(cmd) => Err(format!(
-            "Unknown command: {}. Try /start, /use, /inventory, /leaderboard, /admin.",
+            "Unknown command: {}. Try /start, /use, /inventory, /shop, /buy, /leaderboard, /admin.",
             cmd
         )),
         None => Err("Empty command.".into()),
@@ -154,6 +168,18 @@ fn parse_admin_command(parts: &[&str], pid: PlayerId) -> Result<ParsedCommand, S
                 .parse::<AdminItemKind>()?;
             Ok(ParsedCommand::AdminGiveItem(pid, target, item))
         }
+        Some("coins") => {
+            let target = parse_player_id_arg(
+                parts.get(2),
+                "Usage: /admin coins <player-id> <amount>",
+            )?;
+            let amount = parts
+                .get(3)
+                .ok_or("Usage: /admin coins <player-id> <amount>")?
+                .parse::<i64>()
+                .map_err(|_| "Invalid coin amount.".to_string())?;
+            Ok(ParsedCommand::AdminAdjustCoins(pid, target, amount))
+        }
         Some("set-admin") | Some("admin") => {
             let target = parse_player_id_arg(
                 parts.get(2),
@@ -166,7 +192,7 @@ fn parse_admin_command(parts: &[&str], pid: PlayerId) -> Result<ParsedCommand, S
             Ok(ParsedCommand::AdminSetAdmin(pid, target, is_admin))
         }
         Some(cmd) => Err(format!(
-            "Unknown admin command: {}. Try /admin, /admin give, or /admin set-admin.",
+            "Unknown admin command: {}. Try /admin, /admin give, /admin coins, or /admin set-admin.",
             cmd
         )),
     }
@@ -210,6 +236,14 @@ impl ParsedCommand {
             ParsedCommand::Inventory(pid) => {
                 game.execute(InventoryCommand { player_id: pid }).await
             }
+            ParsedCommand::Shop => game.execute(ShopCommand).await,
+            ParsedCommand::BuyItem(pid, item) => {
+                game.execute(BuyItemCommand {
+                    player_id: pid,
+                    item,
+                })
+                .await
+            }
             ParsedCommand::Leaderboard => game.execute(LeaderboardCommand { limit: 10 }).await,
             ParsedCommand::AdminHelp(pid) => {
                 game.execute(AdminHelpCommand { player_id: pid }).await
@@ -219,6 +253,14 @@ impl ParsedCommand {
                     admin_id,
                     target_player_id,
                     item,
+                })
+                .await
+            }
+            ParsedCommand::AdminAdjustCoins(admin_id, target_player_id, amount) => {
+                game.execute(AdminAdjustCoinsCommand {
+                    admin_id,
+                    target_player_id,
+                    amount,
                 })
                 .await
             }
@@ -243,6 +285,7 @@ fn print_response(response: &mr_roller::response::Response) {
         ResponseKind::DiceRoll => "🎲",
         ResponseKind::Inventory => "🎒",
         ResponseKind::Leaderboard => "🏆",
+        ResponseKind::Shop => "🛒",
     };
 
     println!("  {} {}", icon, response.message);
@@ -257,6 +300,17 @@ fn print_response(response: &mr_roller::response::Response) {
                         let name = item["name"].as_str().unwrap_or("?");
                         let desc = item["description"].as_str().unwrap_or("");
                         println!("    [{}] {} — {}", id, name, desc);
+                    }
+                }
+            }
+            ResponseKind::Shop => {
+                if let Some(items) = data.as_array() {
+                    for item in items {
+                        let key = item["key"].as_str().unwrap_or("?");
+                        let name = item["name"].as_str().unwrap_or("?");
+                        let desc = item["description"].as_str().unwrap_or("");
+                        let price = item["price"].as_u64().unwrap_or(0);
+                        println!("    {} — {} coins — {} — {}", key, price, name, desc);
                     }
                 }
             }
