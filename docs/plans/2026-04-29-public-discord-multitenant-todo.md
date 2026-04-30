@@ -11,7 +11,7 @@ Plan: `docs/plans/2026-04-29-public-discord-multitenant-plan.md`
 - [x] Phase 4 — Implement `/setup channel:<text-channel>`.
 - [x] Phase 5 — Route gameplay/admin commands through the registry by guild/channel.
 - [x] Phase 6 — Replace single-channel event scheduler with multi-game scheduler.
-- [ ] Phase 7 — Document install/deployment basics.
+- [x] Phase 7 — Document install/deployment basics.
 - [x] Run formatting and compile check (`cargo fmt`, `cargo check -p mr-roller-discord`).
 
 ## Notes
