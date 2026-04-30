@@ -1,0 +1,155 @@
+use std::str::FromStr;
+
+use mr_roller::{
+    command::{
+        AdminAdjustCoinsCommand, AdminGiveItemCommand, AdminItemKind, AdminSetAdminCommand,
+        SpawnRandomItemEventCommand,
+    },
+    game::player::PlayerId,
+};
+use poise::CreateReply;
+use serenity::all::User;
+
+use crate::{events::publisher::publish_event_response, render::embeds, Context, Error};
+
+fn author_id(ctx: Context<'_>) -> PlayerId {
+    PlayerId::new(ctx.author().id.get())
+}
+
+fn discord_player_id(user: &User) -> PlayerId {
+    PlayerId::new(user.id.get())
+}
+
+#[poise::command(
+    slash_command,
+    subcommands("give", "coins", "set_admin", "admin_event")
+)]
+pub async fn admin(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn give(
+    ctx: Context<'_>,
+    #[description = "Discord user"] user: User,
+    #[description = "Item to grant"]
+    #[autocomplete = "autocomplete_admin_item"]
+    item: String,
+) -> Result<(), Error> {
+    let item = match AdminItemKind::from_str(&item) {
+        Ok(item) => item,
+        Err(error) => {
+            ctx.send(CreateReply::default().content(error).ephemeral(true))
+                .await?;
+            return Ok(());
+        }
+    };
+    let response = ctx
+        .data()
+        .game
+        .execute(AdminGiveItemCommand {
+            admin_id: author_id(ctx),
+            target_player_id: discord_player_id(&user),
+            item,
+        })
+        .await;
+    send_admin_response(ctx, response).await
+}
+
+#[poise::command(slash_command)]
+pub async fn coins(
+    ctx: Context<'_>,
+    #[description = "Discord user"] user: User,
+    #[description = "Coin delta. Negative values remove coins."] amount: i64,
+) -> Result<(), Error> {
+    let response = ctx
+        .data()
+        .game
+        .execute(AdminAdjustCoinsCommand {
+            admin_id: author_id(ctx),
+            target_player_id: discord_player_id(&user),
+            amount,
+        })
+        .await;
+    send_admin_response(ctx, response).await
+}
+
+#[poise::command(slash_command, rename = "set-admin")]
+pub async fn set_admin(
+    ctx: Context<'_>,
+    #[description = "Discord user"] user: User,
+    #[description = "Whether the user should be an admin"] is_admin: bool,
+) -> Result<(), Error> {
+    let response = ctx
+        .data()
+        .game
+        .execute(AdminSetAdminCommand {
+            admin_id: author_id(ctx),
+            target_player_id: discord_player_id(&user),
+            is_admin,
+        })
+        .await;
+    send_admin_response(ctx, response).await
+}
+
+#[poise::command(slash_command, rename = "event", subcommands("spawn_random_item"))]
+pub async fn admin_event(_ctx: Context<'_>) -> Result<(), Error> {
+    Ok(())
+}
+
+#[poise::command(slash_command, rename = "spawn-random-item")]
+pub async fn spawn_random_item(ctx: Context<'_>) -> Result<(), Error> {
+    let response = ctx
+        .data()
+        .game
+        .execute(SpawnRandomItemEventCommand {
+            admin_id: author_id(ctx),
+        })
+        .await;
+
+    if response.kind == mr_roller::response::ResponseKind::Event
+        && embeds::event_id(&response).is_some()
+    {
+        publish_event_response(
+            &ctx.serenity_context().http,
+            ctx.data().home_channel_id,
+            &response,
+        )
+        .await?;
+        ctx.send(
+            CreateReply::default()
+                .content("Random item event posted.")
+                .ephemeral(true),
+        )
+        .await?;
+        Ok(())
+    } else {
+        send_admin_response(ctx, response).await
+    }
+}
+
+async fn send_admin_response(
+    ctx: Context<'_>,
+    response: mr_roller::response::Response,
+) -> Result<(), Error> {
+    let mut reply = CreateReply::default();
+    if let Some(embed) = embeds::response_embed(&response) {
+        reply = reply.embed(embed);
+    } else {
+        reply = reply.content(response.message.clone());
+    }
+    if response.kind == mr_roller::response::ResponseKind::Error {
+        reply = reply.ephemeral(true);
+    }
+    ctx.send(reply).await?;
+    Ok(())
+}
+
+async fn autocomplete_admin_item(_ctx: Context<'_>, partial: &str) -> Vec<String> {
+    AdminItemKind::keys()
+        .iter()
+        .copied()
+        .filter(|key| key.contains(partial))
+        .map(str::to_string)
+        .collect()
+}

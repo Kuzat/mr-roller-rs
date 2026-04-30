@@ -5,6 +5,7 @@ is organized as a Cargo workspace with the following crates:
 
 - **mr-roller** — library crate containing all core game logic.
 - **mr-roller-cli** — interactive command-line REPL.
+- **mr-roller-discord** — Discord slash-command and event bot frontend.
 - **mr-roller-rs** — workspace root with a simple example binary.
 
 ## Architecture
@@ -34,6 +35,9 @@ cargo build -p mr-roller
 
 # build the CLI
 cargo build -p mr-roller-cli
+
+# build the Discord bot
+cargo build -p mr-roller-discord
 ```
 
 Run the tests across the workspace with:
@@ -146,6 +150,61 @@ The CLI starts a background event scheduler when events are enabled. It checks
 for random item spawns every `check_interval_seconds` and prints spawned events
 to the terminal. A Discord/server runtime can reuse the same `EventScheduler`
 and publish spawned event responses as Discord messages/buttons.
+
+## Discord bot
+
+The Discord frontend is a long-lived server process built with `poise` and
+`serenity`. It uses Discord user snowflakes as `PlayerId` values, stores game
+state in SQLite, registers slash commands, renders structured game responses as
+embeds, and posts random item events with claim/trash buttons.
+
+Configure it in `mr-roller.toml` or with environment overrides:
+
+```toml
+[database]
+url = "sqlite:mr-roller.db?mode=rwc"
+
+[discord]
+enabled = true
+token = ""              # prefer MR_ROLLER__DISCORD__TOKEN in production
+guild_id = 123           # optional dev guild for instant command updates
+home_channel_id = 456    # channel where random events are posted
+```
+
+Run locally:
+
+```bash
+MR_ROLLER__DISCORD__TOKEN='your-bot-token' \
+MR_ROLLER__DISCORD__HOME_CHANNEL_ID='456' \
+cargo run -p mr-roller-discord
+```
+
+The Discord binary requires a file-backed SQLite database URL and a home channel
+ID. If `discord.guild_id` is set, commands are registered to that guild;
+otherwise they are registered globally.
+
+Available Discord commands include:
+
+```text
+/ping
+/start
+/inventory
+/shop
+/buy item:<shop key>
+/leaderboard
+/use item:<inventory item>
+/events
+/event claim event:<event id>
+/event trash event:<event id>
+/admin give user:<Discord user> item:<item>
+/admin coins user:<Discord user> amount:<delta>
+/admin set-admin user:<Discord user> is-admin:<bool>
+/admin event spawn-random-item
+```
+
+Random events are also checked by the Discord process using the shared core
+`EventScheduler`. Spawned events are posted to `discord.home_channel_id` with
+`Claim` and `Trash` buttons.
 
 ## Database migrations
 

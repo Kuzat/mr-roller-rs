@@ -7,5 +7,5 @@ edition = "2021"
 members = [
     "mr-roller",
     "mr-roller-cli",
-    # "mr-roller-discord",
+    "mr-roller-discord",
 ]

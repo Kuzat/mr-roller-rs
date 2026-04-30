@@ -3,17 +3,18 @@
 # Environment overrides use config-rs' idiomatic nested key format:
 #   MR_ROLLER__DATABASE__URL='sqlite:mr-roller.db?mode=rwc'
 #   MR_ROLLER__ADMIN__BOOTSTRAP_ADMIN_IDS='1,42'
+#   MR_ROLLER__DISCORD__TOKEN='your-token'
 #
 # To load a different config file, set:
 #   MR_ROLLER_CONFIG='./path/to/mr-roller.toml'
 
 [admin]
 # Player IDs that become admins when they run /start.
-bootstrap_admin_ids = [1]
+bootstrap_admin_ids = [119502664126955523]
 
 [database]
 # Omit or comment out `url` to use in-memory storage.
-url = "sqlite:mr-roller-test.db?mode=rwc"
+url = "sqlite:mr-roller-discord.db?mode=rwc"
 
 [events]
 enabled = true
@@ -32,3 +33,11 @@ weight = 1
 [[events.random_item_spawn.items]]
 kind = "reroll_token"
 weight = 3
+
+[discord]
+enabled = true
+# token = ""
+# Optional dev guild for instant command registration.
+guild_id = 1357697998192119899
+# Channel where random events are posted.
+home_channel_id = 1499329261717291039

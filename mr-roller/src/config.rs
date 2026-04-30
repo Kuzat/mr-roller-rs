@@ -15,6 +15,16 @@ pub struct Settings {
     pub admin: AdminConfig,
     pub database: DatabaseConfig,
     pub events: EventsConfig,
+    pub discord: DiscordConfig,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct DiscordConfig {
+    pub enabled: bool,
+    pub token: Option<String>,
+    pub guild_id: Option<u64>,
+    pub home_channel_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -149,6 +159,7 @@ mod tests {
             },
             database: DatabaseConfig::default(),
             events: EventsConfig::default(),
+            discord: DiscordConfig::default(),
         };
 
         assert_eq!(
