@@ -1,7 +1,6 @@
 use mr_roller::response::Response;
-use serenity::{
-    all::{ChannelId, CreateMessage, Http},
-    builder::EditMessage,
+use serenity::all::{
+    ChannelId, CreateInteractionResponse, CreateInteractionResponseMessage, CreateMessage, Http,
 };
 
 use crate::render::{components, embeds};
@@ -20,14 +19,20 @@ pub async fn publish_event_response(
     Ok(())
 }
 
-pub async fn edit_event_message_final(
+pub async fn update_event_interaction_message(
     http: &Http,
     component: &serenity::all::ComponentInteraction,
     response: &Response,
 ) -> Result<(), Error> {
-    let message = EditMessage::new()
-        .embed(embeds::event_embed(response))
-        .components(Vec::new());
-    component.message.clone().edit(http, message).await?;
+    component
+        .create_response(
+            http,
+            CreateInteractionResponse::UpdateMessage(
+                CreateInteractionResponseMessage::new()
+                    .embed(embeds::event_embed(response))
+                    .components(Vec::new()),
+            ),
+        )
+        .await?;
     Ok(())
 }

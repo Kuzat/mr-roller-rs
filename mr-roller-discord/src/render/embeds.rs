@@ -102,7 +102,12 @@ pub fn event_embed(response: &Response) -> CreateEmbed {
             embed = embed.field("Item", item_name, true);
         }
         if let Some(status) = data["status"].as_str() {
-            embed = embed.field("Status", status, true);
+            let status_text = match (status, data["actor_id"].as_u64()) {
+                ("claimed", Some(player_id)) => format!("claimed by <@{player_id}>"),
+                ("trashed", Some(player_id)) => format!("trashed by <@{player_id}>"),
+                _ => status.to_string(),
+            };
+            embed = embed.field("Status", status_text, true);
         }
         if let Some(expires_at) = data["expires_at"].as_str() {
             embed = embed.field("Expires at", expires_at, false);

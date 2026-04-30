@@ -419,16 +419,19 @@ fn event_to_json(event: &ActiveEvent) -> serde_json::Value {
         EventKind::RandomItemSpawn { item } => Some(item.name().to_string()),
     };
 
+    let (status, actor_id) = match &event.status {
+        EventStatus::Active => ("active", None),
+        EventStatus::Claimed { player_id } => ("claimed", Some(player_id.0)),
+        EventStatus::Trashed { player_id } => ("trashed", Some(player_id.0)),
+        EventStatus::Expired => ("expired", None),
+    };
+
     serde_json::json!({
         "id": event.id.to_string(),
         "title": event.title(),
         "description": event.description(),
-        "status": match &event.status {
-            EventStatus::Active => "active",
-            EventStatus::Claimed { .. } => "claimed",
-            EventStatus::Trashed { .. } => "trashed",
-            EventStatus::Expired => "expired",
-        },
+        "status": status,
+        "actor_id": actor_id,
         "item_name": item_name,
         "expires_at": event.expires_at.to_rfc3339(),
     })

@@ -59,7 +59,18 @@ pub async fn inventory(ctx: Context<'_>) -> Result<(), Error> {
             player_id: player_id(ctx),
         })
         .await;
-    send_response(ctx, response).await
+    send_private_response(ctx, response).await
+}
+
+async fn send_private_response(ctx: Context<'_>, response: Response) -> Result<(), Error> {
+    let mut reply = CreateReply::default().ephemeral(true);
+    if let Some(embed) = embeds::response_embed(&response) {
+        reply = reply.embed(embed);
+    } else {
+        reply = reply.content(response.message.clone());
+    }
+    ctx.send(reply).await?;
+    Ok(())
 }
 
 #[poise::command(slash_command)]

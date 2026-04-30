@@ -4,15 +4,15 @@ use mr_roller::{
 };
 use poise::serenity_prelude as serenity;
 use serenity::all::{
-    CreateInteractionResponse, CreateInteractionResponseMessage, FullEvent, GatewayIntents,
-    Interaction,
+    ActivityData, CreateInteractionResponse, CreateInteractionResponseMessage, FullEvent,
+    GatewayIntents, Interaction, OnlineStatus,
 };
 use tracing::{error, info};
 
 use crate::{
     commands,
     config::DiscordRuntimeConfig,
-    events::{publisher::edit_event_message_final, scheduler::spawn_event_scheduler},
+    events::{publisher::update_event_interaction_message, scheduler::spawn_event_scheduler},
     render::components::{parse_event_custom_id, EventButtonAction},
     Data, Error,
 };
@@ -38,6 +38,16 @@ pub async fn run_bot(
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
                 info!(user = %ready.user.name, "Discord bot connected");
+                ctx.set_presence(
+                    Some(ActivityData::playing("Mr Roller 🎲")),
+                    OnlineStatus::Online,
+                );
+                if let Err(error) = home_channel_id
+                    .say(&ctx.http, "🎲 Mr Roller is online and ready.")
+                    .await
+                {
+                    error!(?error, "failed to send Discord startup message");
+                }
                 if let Some(guild_id) = guild_id {
                     poise::builtins::register_in_guild(
                         ctx,
@@ -85,13 +95,6 @@ async fn handle_event(
         return Ok(());
     };
 
-    component
-        .create_response(
-            &ctx.http,
-            CreateInteractionResponse::Defer(CreateInteractionResponseMessage::new()),
-        )
-        .await?;
-
     let player_id = PlayerId::new(component.user.id.get());
     let response = match action {
         EventButtonAction::Claim => {
@@ -114,19 +117,21 @@ async fn handle_event(
 
     if response.kind == mr_roller::response::ResponseKind::Error {
         if let Err(error) = component
-            .create_followup(
+            .create_response(
                 &ctx.http,
-                serenity::CreateInteractionResponseFollowup::new()
-                    .content(response.message)
-                    .ephemeral(true),
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                        .content(response.message)
+                        .ephemeral(true),
+                ),
             )
             .await
         {
-            error!(?error, "failed to send event button error follow-up");
+            error!(?error, "failed to send event button error response");
         }
         return Ok(());
     }
 
-    edit_event_message_final(&ctx.http, component, &response).await?;
+    update_event_interaction_message(&ctx.http, component, &response).await?;
     Ok(())
 }
