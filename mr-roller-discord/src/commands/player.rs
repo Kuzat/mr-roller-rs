@@ -7,7 +7,7 @@ use mr_roller::{
     },
     game::{inventory::ItemId, player::PlayerId},
     response::Response,
-    store::InventoryStore,
+    store::{InventoryStore, PlayerStore},
 };
 use poise::CreateReply;
 use serenity::all::AutocompleteChoice;
@@ -76,7 +76,19 @@ async fn send_private_response(ctx: Context<'_>, response: Response) -> Result<(
 #[poise::command(slash_command)]
 pub async fn shop(ctx: Context<'_>) -> Result<(), Error> {
     let response = ctx.data().game.execute(ShopCommand).await;
-    send_response(ctx, response).await
+    let coins = ctx
+        .data()
+        .store
+        .get(player_id(ctx))
+        .await
+        .ok()
+        .map(|player| player.coins);
+
+    let reply = CreateReply::default()
+        .embed(embeds::shop_embed_with_coins(&response, coins))
+        .ephemeral(true);
+    ctx.send(reply).await?;
+    Ok(())
 }
 
 #[poise::command(slash_command)]

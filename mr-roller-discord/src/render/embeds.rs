@@ -30,9 +30,18 @@ pub fn inventory_embed(response: &Response) -> CreateEmbed {
 }
 
 pub fn shop_embed(response: &Response) -> CreateEmbed {
-    let mut embed = CreateEmbed::new()
-        .title("🛒 Shop")
-        .description("Use `/buy item:<item>` to buy an item.");
+    shop_embed_with_coins(response, None)
+}
+
+pub fn shop_embed_with_coins(response: &Response, coins: Option<u64>) -> CreateEmbed {
+    let description = match coins {
+        Some(coins) => {
+            format!("You have **{coins} coins** available.\nUse `/buy item:<item>` to buy an item.")
+        }
+        None => "Use `/buy item:<item>` to buy an item.".to_string(),
+    };
+
+    let mut embed = CreateEmbed::new().title("🛒 Shop").description(description);
 
     if let Some(items) = response.data.as_ref().and_then(|data| data.as_array()) {
         for item in items {
