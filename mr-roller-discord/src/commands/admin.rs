@@ -10,7 +10,10 @@ use mr_roller::{
 use poise::CreateReply;
 use serenity::all::{Mentionable, User};
 
-use crate::{events::publisher::publish_event_response, render::embeds, Context, Error};
+use crate::{
+    events::publisher::publish_event_response, render::embeds, storage::ResolvedDiscordGame,
+    Context, Error,
+};
 
 fn author_id(ctx: Context<'_>) -> PlayerId {
     PlayerId::new(ctx.author().id.get())
@@ -18,6 +21,34 @@ fn author_id(ctx: Context<'_>) -> PlayerId {
 
 fn discord_player_id(user: &User) -> PlayerId {
     PlayerId::new(user.id.get())
+}
+
+async fn resolve_game(ctx: Context<'_>) -> Result<Option<ResolvedDiscordGame>, Error> {
+    let Some(guild_id) = ctx.guild_id() else {
+        ctx.send(
+            CreateReply::default()
+                .content("Mr Roller games must be used inside a server channel.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(None);
+    };
+
+    let Some(resolved) = ctx
+        .data()
+        .games
+        .game_for_channel(guild_id, ctx.channel_id())
+        .await?
+    else {
+        ctx.send(
+            CreateReply::default()
+                .content("No Mr Roller game is configured for this channel.\nAsk a server manager to run `/setup channel:#this-channel`.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(None);
+    };
+    Ok(Some(resolved))
 }
 
 #[poise::command(
@@ -45,8 +76,10 @@ pub async fn give(
             return Ok(());
         }
     };
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(AdminGiveItemCommand {
             admin_id: author_id(ctx),
@@ -69,8 +102,10 @@ pub async fn coins(
     #[description = "Coin delta. Negative values remove coins."] amount: i64,
     #[description = "Show the result to everyone instead of only you"] show_all: Option<bool>,
 ) -> Result<(), Error> {
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(AdminAdjustCoinsCommand {
             admin_id: author_id(ctx),
@@ -93,8 +128,10 @@ pub async fn set_admin(
     #[description = "Whether the user should be an admin"] is_admin: bool,
     #[description = "Show the result to everyone instead of only you"] show_all: Option<bool>,
 ) -> Result<(), Error> {
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(AdminSetAdminCommand {
             admin_id: author_id(ctx),
@@ -117,8 +154,10 @@ pub async fn admin_event(_ctx: Context<'_>) -> Result<(), Error> {
 
 #[poise::command(slash_command, rename = "spawn-random-item")]
 pub async fn spawn_random_item(ctx: Context<'_>) -> Result<(), Error> {
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(SpawnRandomItemEventCommand {
             admin_id: author_id(ctx),
@@ -130,7 +169,7 @@ pub async fn spawn_random_item(ctx: Context<'_>) -> Result<(), Error> {
     {
         publish_event_response(
             &ctx.serenity_context().http,
-            ctx.data().home_channel_id,
+            resolved.discord_game.channel_id,
             &response,
         )
         .await?;

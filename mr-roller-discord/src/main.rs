@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use anyhow::Context as _;
-use mr_roller::{config::Settings, game::Game, store::SqliteStore};
-use serenity::all::ChannelId;
+use mr_roller::config::Settings;
 use tracing::warn;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -11,15 +8,14 @@ mod commands;
 mod config;
 mod events;
 mod render;
+mod storage;
 
 pub type Error = anyhow::Error;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[derive(Clone)]
 pub struct Data {
-    pub game: Arc<Game>,
-    pub store: Arc<SqliteStore>,
-    pub home_channel_id: ChannelId,
+    pub games: storage::DiscordGameRegistry,
 }
 
 #[tokio::main]
@@ -33,25 +29,14 @@ async fn main() -> anyhow::Result<()> {
         warn!("discord.enabled is false; starting bot anyway because this binary was invoked directly");
     }
 
-    let store = Arc::new(
-        SqliteStore::connect(&discord_config.database_url)
-            .await
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
-    );
-    let game = Arc::new(Game::with_event_store(
-        store.clone(),
-        store.clone(),
-        store.clone(),
-        store.clone(),
-        settings.bootstrap_admin_player_ids(),
+    let registry = storage::DiscordGameRegistry::connect(
+        &discord_config.database_url,
         settings.events.clone(),
-    ));
+    )
+    .await
+    .context("failed to connect to Postgres Discord game registry")?;
 
-    let data = Data {
-        game,
-        store,
-        home_channel_id: discord_config.home_channel_id,
-    };
+    let data = Data { games: registry };
 
     bot::run_bot(discord_config, data, settings.events.check_interval_seconds).await?;
     Ok(())

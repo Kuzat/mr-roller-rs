@@ -1164,10 +1164,13 @@ name = "mr-roller-discord"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "chrono",
  "mr-roller",
  "poise",
  "serde_json",
  "serenity",
+ "sqlx",
  "tokio",
  "tracing",
  "tracing-subscriber",
