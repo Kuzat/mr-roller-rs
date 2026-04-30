@@ -8,7 +8,7 @@ use mr_roller::{
     game::player::PlayerId,
 };
 use poise::CreateReply;
-use serenity::all::User;
+use serenity::all::{Mentionable, User};
 
 use crate::{events::publisher::publish_event_response, render::embeds, Context, Error};
 
@@ -35,6 +35,7 @@ pub async fn give(
     #[description = "Item to grant"]
     #[autocomplete = "autocomplete_admin_item"]
     item: String,
+    #[description = "Show the result to everyone instead of only you"] show_all: Option<bool>,
 ) -> Result<(), Error> {
     let item = match AdminItemKind::from_str(&item) {
         Ok(item) => item,
@@ -53,7 +54,12 @@ pub async fn give(
             item,
         })
         .await;
-    send_admin_response(ctx, response).await
+    send_admin_response(
+        ctx,
+        mention_target(response, &user),
+        show_all.unwrap_or(false),
+    )
+    .await
 }
 
 #[poise::command(slash_command)]
@@ -61,6 +67,7 @@ pub async fn coins(
     ctx: Context<'_>,
     #[description = "Discord user"] user: User,
     #[description = "Coin delta. Negative values remove coins."] amount: i64,
+    #[description = "Show the result to everyone instead of only you"] show_all: Option<bool>,
 ) -> Result<(), Error> {
     let response = ctx
         .data()
@@ -71,7 +78,12 @@ pub async fn coins(
             amount,
         })
         .await;
-    send_admin_response(ctx, response).await
+    send_admin_response(
+        ctx,
+        mention_target(response, &user),
+        show_all.unwrap_or(false),
+    )
+    .await
 }
 
 #[poise::command(slash_command, rename = "set-admin")]
@@ -79,6 +91,7 @@ pub async fn set_admin(
     ctx: Context<'_>,
     #[description = "Discord user"] user: User,
     #[description = "Whether the user should be an admin"] is_admin: bool,
+    #[description = "Show the result to everyone instead of only you"] show_all: Option<bool>,
 ) -> Result<(), Error> {
     let response = ctx
         .data()
@@ -89,7 +102,12 @@ pub async fn set_admin(
             is_admin,
         })
         .await;
-    send_admin_response(ctx, response).await
+    send_admin_response(
+        ctx,
+        mention_target(response, &user),
+        show_all.unwrap_or(false),
+    )
+    .await
 }
 
 #[poise::command(slash_command, rename = "event", subcommands("spawn_random_item"))]
@@ -124,15 +142,16 @@ pub async fn spawn_random_item(ctx: Context<'_>) -> Result<(), Error> {
         .await?;
         Ok(())
     } else {
-        send_admin_response(ctx, response).await
+        send_admin_response(ctx, response, false).await
     }
 }
 
 async fn send_admin_response(
     ctx: Context<'_>,
     response: mr_roller::response::Response,
+    show_all: bool,
 ) -> Result<(), Error> {
-    let mut reply = CreateReply::default();
+    let mut reply = CreateReply::default().ephemeral(!show_all);
     if let Some(embed) = embeds::response_embed(&response) {
         reply = reply.embed(embed);
     } else {
@@ -143,6 +162,16 @@ async fn send_admin_response(
     }
     ctx.send(reply).await?;
     Ok(())
+}
+
+fn mention_target(
+    mut response: mr_roller::response::Response,
+    user: &User,
+) -> mr_roller::response::Response {
+    response.message = response
+        .message
+        .replace(&user.id.get().to_string(), &user.mention().to_string());
+    response
 }
 
 async fn autocomplete_admin_item(_ctx: Context<'_>, partial: &str) -> Vec<String> {
