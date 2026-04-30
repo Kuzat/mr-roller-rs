@@ -48,7 +48,7 @@ Plan: `docs/plans/2026-04-29-discord-version-plan.md`
 ## Phase 7 — Operational polish
 
 - [x] Add structured logs with `tracing`.
-- [ ] Add explicit graceful shutdown wiring.
+- [x] Add explicit graceful shutdown wiring.
 - [x] Add startup validation for Discord token/channel/database config.
 - [x] Add README instructions for Discord setup and permissions.
 

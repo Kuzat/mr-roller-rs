@@ -76,8 +76,39 @@ pub async fn run_bot(
         .framework(framework)
         .await?;
 
-    client.start().await?;
+    let shard_manager = client.shard_manager.clone();
+
+    tokio::select! {
+        result = client.start() => {
+            result?;
+        }
+        _ = shutdown_signal() => {
+            info!("shutdown signal received; closing Discord gateway shards");
+            shard_manager.shutdown_all().await;
+            info!("Discord bot shutdown complete");
+        }
+    }
+
     Ok(())
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut terminate = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl+C handler");
 }
 
 async fn handle_event(
