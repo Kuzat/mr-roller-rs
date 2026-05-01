@@ -175,6 +175,12 @@ token = ""       # prefer MR_ROLLER__DISCORD__TOKEN in production
 guild_id = 123    # optional dev guild for instant command updates; omit/0 for global commands
 ```
 
+Start the local PostgreSQL dependency:
+
+```bash
+docker compose up -d postgres
+```
+
 Run locally:
 
 ```bash
@@ -186,7 +192,8 @@ cargo run -p mr-roller-discord
 The Discord binary requires a PostgreSQL `database.url`. If `discord.guild_id` is
 set, commands are registered to that guild; otherwise they are registered
 globally. SQLite remains available for the core crate, tests, CLI, and local
-single-process use, but not for the public Discord runtime.
+single-process use, but not for the public Discord runtime. Migrations are
+applied automatically when the Discord process starts.
 
 To install the hosted app, create an OAuth2 URL in the Discord Developer Portal
 with scopes `bot` and `applications.commands`. Recommended bot permissions are

@@ -3,6 +3,8 @@ use serenity::all::{ChannelType, GuildChannel, Mentionable, Permissions};
 
 use crate::{Context, Error};
 
+use super::resolve_game;
+
 #[poise::command(slash_command)]
 pub async fn setup(
     ctx: Context<'_>,
@@ -96,28 +98,7 @@ pub async fn setup(
 
 #[poise::command(slash_command)]
 pub async fn status(ctx: Context<'_>) -> Result<(), Error> {
-    let Some(guild_id) = ctx.guild_id() else {
-        ctx.send(
-            CreateReply::default()
-                .content("Mr Roller games must be used inside a server channel.")
-                .ephemeral(true),
-        )
-        .await?;
-        return Ok(());
-    };
-
-    let Some(resolved) = ctx
-        .data()
-        .games
-        .game_for_channel(guild_id, ctx.channel_id())
-        .await?
-    else {
-        ctx.send(
-            CreateReply::default()
-                .content("No Mr Roller game is configured for this channel.\nAsk a server manager to run `/setup channel:#this-channel`.")
-                .ephemeral(true),
-        )
-        .await?;
+    let Some(resolved) = resolve_game(ctx).await? else {
         return Ok(());
     };
 

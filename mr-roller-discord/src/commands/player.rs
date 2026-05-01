@@ -12,38 +12,12 @@ use mr_roller::{
 use poise::CreateReply;
 use serenity::all::AutocompleteChoice;
 
-use crate::{render::embeds, storage::ResolvedDiscordGame, Context, Error};
+use crate::{render::embeds, Context, Error};
+
+use super::resolve_game;
 
 fn player_id(ctx: Context<'_>) -> PlayerId {
     PlayerId::new(ctx.author().id.get())
-}
-
-async fn resolve_game(ctx: Context<'_>) -> Result<Option<ResolvedDiscordGame>, Error> {
-    let Some(guild_id) = ctx.guild_id() else {
-        ctx.send(
-            CreateReply::default()
-                .content("Mr Roller games must be used inside a server channel.")
-                .ephemeral(true),
-        )
-        .await?;
-        return Ok(None);
-    };
-
-    let Some(resolved) = ctx
-        .data()
-        .games
-        .game_for_channel(guild_id, ctx.channel_id())
-        .await?
-    else {
-        ctx.send(
-            CreateReply::default()
-                .content("No Mr Roller game is configured for this channel.\nAsk a server manager to run `/setup channel:#this-channel`.")
-                .ephemeral(true),
-        )
-        .await?;
-        return Ok(None);
-    };
-    Ok(Some(resolved))
 }
 
 async fn send_response(ctx: Context<'_>, response: Response) -> Result<(), Error> {
