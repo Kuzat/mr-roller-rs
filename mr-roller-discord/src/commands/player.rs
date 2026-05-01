@@ -14,6 +14,8 @@ use serenity::all::AutocompleteChoice;
 
 use crate::{render::embeds, Context, Error};
 
+use super::resolve_game;
+
 fn player_id(ctx: Context<'_>) -> PlayerId {
     PlayerId::new(ctx.author().id.get())
 }
@@ -32,36 +34,6 @@ async fn send_response(ctx: Context<'_>, response: Response) -> Result<(), Error
     Ok(())
 }
 
-#[poise::command(slash_command)]
-pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.say("Pong!").await?;
-    Ok(())
-}
-
-#[poise::command(slash_command)]
-pub async fn start(ctx: Context<'_>) -> Result<(), Error> {
-    let response = ctx
-        .data()
-        .game
-        .execute(StartCommand {
-            player_id: player_id(ctx),
-        })
-        .await;
-    send_response(ctx, response).await
-}
-
-#[poise::command(slash_command)]
-pub async fn inventory(ctx: Context<'_>) -> Result<(), Error> {
-    let response = ctx
-        .data()
-        .game
-        .execute(InventoryCommand {
-            player_id: player_id(ctx),
-        })
-        .await;
-    send_private_response(ctx, response).await
-}
-
 async fn send_private_response(ctx: Context<'_>, response: Response) -> Result<(), Error> {
     let mut reply = CreateReply::default().ephemeral(true);
     if let Some(embed) = embeds::response_embed(&response) {
@@ -74,10 +46,46 @@ async fn send_private_response(ctx: Context<'_>, response: Response) -> Result<(
 }
 
 #[poise::command(slash_command)]
+pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
+    ctx.say("Pong!").await?;
+    Ok(())
+}
+
+#[poise::command(slash_command)]
+pub async fn start(ctx: Context<'_>) -> Result<(), Error> {
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
+        .game
+        .execute(StartCommand {
+            player_id: player_id(ctx),
+        })
+        .await;
+    send_response(ctx, response).await
+}
+
+#[poise::command(slash_command)]
+pub async fn inventory(ctx: Context<'_>) -> Result<(), Error> {
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
+        .game
+        .execute(InventoryCommand {
+            player_id: player_id(ctx),
+        })
+        .await;
+    send_private_response(ctx, response).await
+}
+
+#[poise::command(slash_command)]
 pub async fn shop(ctx: Context<'_>) -> Result<(), Error> {
-    let response = ctx.data().game.execute(ShopCommand).await;
-    let coins = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved.game.execute(ShopCommand).await;
+    let coins = resolved
         .store
         .get(player_id(ctx))
         .await
@@ -106,8 +114,10 @@ pub async fn buy(
             return Ok(());
         }
     };
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(BuyItemCommand {
             player_id: player_id(ctx),
@@ -119,8 +129,10 @@ pub async fn buy(
 
 #[poise::command(slash_command)]
 pub async fn leaderboard(ctx: Context<'_>) -> Result<(), Error> {
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(LeaderboardCommand { limit: 10 })
         .await;
@@ -146,8 +158,10 @@ pub async fn use_item(
             return Ok(());
         }
     };
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(UseItemCommand {
             player_id: player_id(ctx),
@@ -159,7 +173,10 @@ pub async fn use_item(
 
 #[poise::command(slash_command)]
 pub async fn events(ctx: Context<'_>) -> Result<(), Error> {
-    let response = ctx.data().game.execute(ListActiveEventsCommand).await;
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved.game.execute(ListActiveEventsCommand).await;
     send_response(ctx, response).await
 }
 
@@ -178,8 +195,10 @@ pub async fn claim(
     let Some(event_id) = parse_uuid_reply(ctx, &event).await? else {
         return Ok(());
     };
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(mr_roller::command::ClaimEventCommand {
             player_id: player_id(ctx),
@@ -199,8 +218,10 @@ pub async fn trash(
     let Some(event_id) = parse_uuid_reply(ctx, &event).await? else {
         return Ok(());
     };
-    let response = ctx
-        .data()
+    let Some(resolved) = resolve_game(ctx).await? else {
+        return Ok(());
+    };
+    let response = resolved
         .game
         .execute(mr_roller::command::TrashEventCommand {
             player_id: player_id(ctx),
@@ -236,7 +257,18 @@ async fn autocomplete_shop_item(_ctx: Context<'_>, partial: &str) -> Vec<String>
 async fn autocomplete_inventory_item(ctx: Context<'_>, partial: &str) -> Vec<AutocompleteChoice> {
     let player_id = player_id(ctx);
     let partial = partial.to_ascii_lowercase();
-    let Ok(items) = ctx.data().store.list_items(player_id).await else {
+    let Some(guild_id) = ctx.guild_id() else {
+        return Vec::new();
+    };
+    let Ok(Some(resolved)) = ctx
+        .data()
+        .games
+        .game_for_channel(guild_id, ctx.channel_id())
+        .await
+    else {
+        return Vec::new();
+    };
+    let Ok(items) = resolved.store.list_items(player_id).await else {
         return Vec::new();
     };
 
@@ -256,7 +288,18 @@ async fn autocomplete_inventory_item(ctx: Context<'_>, partial: &str) -> Vec<Aut
 }
 
 async fn autocomplete_event_id(ctx: Context<'_>, partial: &str) -> Vec<AutocompleteChoice> {
-    let response = ctx.data().game.execute(ListActiveEventsCommand).await;
+    let Some(guild_id) = ctx.guild_id() else {
+        return Vec::new();
+    };
+    let Ok(Some(resolved)) = ctx
+        .data()
+        .games
+        .game_for_channel(guild_id, ctx.channel_id())
+        .await
+    else {
+        return Vec::new();
+    };
+    let response = resolved.game.execute(ListActiveEventsCommand).await;
     let Some(events) = response.data.and_then(|data| data.as_array().cloned()) else {
         return Vec::new();
     };

@@ -24,8 +24,7 @@ pub async fn run_bot(
 ) -> Result<(), Error> {
     let token = config.token.clone();
     let guild_id = config.guild_id;
-    let scheduler_game = data.game.clone();
-    let home_channel_id = data.home_channel_id;
+    let scheduler_registry = data.games.clone();
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
@@ -42,12 +41,6 @@ pub async fn run_bot(
                     Some(ActivityData::playing("Mr Roller 🎲")),
                     OnlineStatus::Online,
                 );
-                if let Err(error) = home_channel_id
-                    .say(&ctx.http, "🎲 Mr Roller is online and ready.")
-                    .await
-                {
-                    error!(?error, "failed to send Discord startup message");
-                }
                 if let Some(guild_id) = guild_id {
                     poise::builtins::register_in_guild(
                         ctx,
@@ -60,12 +53,7 @@ pub async fn run_bot(
                     poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                     info!("registered global slash commands");
                 }
-                spawn_event_scheduler(
-                    scheduler_game,
-                    ctx.http.clone(),
-                    home_channel_id,
-                    check_interval_seconds,
-                );
+                spawn_event_scheduler(scheduler_registry, ctx.http.clone(), check_interval_seconds);
                 Ok(data)
             })
         })
@@ -126,10 +114,32 @@ async fn handle_event(
         return Ok(());
     };
 
+    let Some(guild_id) = component.guild_id else {
+        return Ok(());
+    };
+    let Some(resolved) = data
+        .games
+        .game_for_channel(guild_id, component.channel_id)
+        .await?
+    else {
+        component
+            .create_response(
+                &ctx.http,
+                CreateInteractionResponse::Message(
+                    CreateInteractionResponseMessage::new()
+                        .content("No Mr Roller game is configured for this channel. Ask a server manager to run `/setup channel:#this-channel`.")
+                        .ephemeral(true),
+                ),
+            )
+            .await?;
+        return Ok(());
+    };
+
     let player_id = PlayerId::new(component.user.id.get());
     let response = match action {
         EventButtonAction::Claim => {
-            data.game
+            resolved
+                .game
                 .execute(ClaimEventCommand {
                     player_id,
                     event_id,
@@ -137,7 +147,8 @@ async fn handle_event(
                 .await
         }
         EventButtonAction::Trash => {
-            data.game
+            resolved
+                .game
                 .execute(TrashEventCommand {
                     player_id,
                     event_id,

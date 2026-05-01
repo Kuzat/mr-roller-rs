@@ -1,12 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use mr_roller::config::Settings;
-use serenity::all::{ChannelId, GuildId};
+use serenity::all::GuildId;
 
 #[derive(Debug, Clone)]
 pub struct DiscordRuntimeConfig {
     pub token: String,
     pub guild_id: Option<GuildId>,
-    pub home_channel_id: ChannelId,
     pub database_url: String,
 }
 
@@ -19,19 +18,12 @@ impl DiscordRuntimeConfig {
             .filter(|token| !token.trim().is_empty())
             .ok_or_else(|| anyhow!("missing discord.token (or MR_ROLLER__DISCORD__TOKEN)"))?;
 
-        let home_channel_id = settings
-            .discord
-            .home_channel_id
-            .filter(|id| *id != 0)
-            .map(ChannelId::new)
-            .ok_or_else(|| anyhow!("missing discord.home_channel_id"))?;
-
         let database_url = settings
             .database
             .url
             .clone()
-            .filter(|url| !url.trim().is_empty() && url != "sqlite::memory:")
-            .context("the Discord server requires a file-backed SQLite database url")?;
+            .filter(|url| !url.trim().is_empty() && url.starts_with("postgres"))
+            .context("the public Discord server requires a PostgreSQL database.url")?;
 
         Ok(Self {
             token,
@@ -40,7 +32,6 @@ impl DiscordRuntimeConfig {
                 .guild_id
                 .filter(|id| *id != 0)
                 .map(GuildId::new),
-            home_channel_id,
             database_url,
         })
     }

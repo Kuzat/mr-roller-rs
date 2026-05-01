@@ -153,40 +153,59 @@ and publish spawned event responses as Discord messages/buttons.
 
 ## Discord bot
 
-The Discord frontend is a long-lived server process built with `poise` and
-`serenity`. It uses Discord user snowflakes as `PlayerId` values, stores game
-state in SQLite, registers slash commands, renders structured game responses as
-embeds, and posts random item events with claim/trash buttons.
+The Discord frontend is a long-lived public application process built with
+`poise` and `serenity`. It uses Discord user snowflakes as `PlayerId` values,
+stores game state in PostgreSQL, registers slash commands, renders structured
+game responses as embeds, and posts random item events with claim/trash buttons.
+
+The Discord process is multi-tenant. A server manager installs the app, runs
+`/setup channel:#dice-game`, and the bot creates an isolated game for that
+Discord guild + channel. The same Discord server can host separate games in
+separate channels.
 
 Configure it in `mr-roller.toml` or with environment overrides:
 
 ```toml
 [database]
-url = "sqlite:mr-roller.db?mode=rwc"
+url = "postgres://mr_roller:secret@localhost:5432/mr_roller"
 
 [discord]
 enabled = true
-token = ""              # prefer MR_ROLLER__DISCORD__TOKEN in production
-guild_id = 123           # optional dev guild for instant command updates
-home_channel_id = 456    # channel where random events are posted
+token = ""       # prefer MR_ROLLER__DISCORD__TOKEN in production
+guild_id = 123    # optional dev guild for instant command updates; omit/0 for global commands
+```
+
+Start the local PostgreSQL dependency:
+
+```bash
+docker compose up -d postgres
 ```
 
 Run locally:
 
 ```bash
 MR_ROLLER__DISCORD__TOKEN='your-bot-token' \
-MR_ROLLER__DISCORD__HOME_CHANNEL_ID='456' \
+MR_ROLLER__DATABASE__URL='postgres://mr_roller:secret@localhost:5432/mr_roller' \
 cargo run -p mr-roller-discord
 ```
 
-The Discord binary requires a file-backed SQLite database URL and a home channel
-ID. If `discord.guild_id` is set, commands are registered to that guild;
-otherwise they are registered globally.
+The Discord binary requires a PostgreSQL `database.url`. If `discord.guild_id` is
+set, commands are registered to that guild; otherwise they are registered
+globally. SQLite remains available for the core crate, tests, CLI, and local
+single-process use, but not for the public Discord runtime. Migrations are
+applied automatically when the Discord process starts.
+
+To install the hosted app, create an OAuth2 URL in the Discord Developer Portal
+with scopes `bot` and `applications.commands`. Recommended bot permissions are
+View Channels, Send Messages, Embed Links, Read Message History, and Use Slash
+Commands.
 
 Available Discord commands include:
 
 ```text
 /ping
+/setup channel:<text-channel>
+/status
 /start
 /inventory
 /shop
@@ -203,7 +222,7 @@ Available Discord commands include:
 ```
 
 Random events are also checked by the Discord process using the shared core
-`EventScheduler`. Spawned events are posted to `discord.home_channel_id` with
+`EventScheduler`. Spawned events are posted to each configured game channel with
 `Claim` and `Trash` buttons.
 
 ## Database migrations
