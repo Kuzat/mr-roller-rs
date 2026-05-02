@@ -106,6 +106,8 @@ fn row_to_player(row: sqlx::sqlite::SqliteRow) -> Result<Player, MrRollerError> 
         luck: row.try_get::<i64, _>("luck")? as u64,
         coins: row.try_get::<i64, _>("coins")? as u64,
         xp: row.try_get::<i64, _>("xp")? as u64,
+        has_started: row.try_get::<i64, _>("has_started")? != 0,
+        tutorial_completed: row.try_get::<i64, _>("tutorial_completed")? != 0,
         is_admin: row.try_get::<i64, _>("is_admin")? != 0,
     })
 }
@@ -115,7 +117,7 @@ impl PlayerStore for SqliteStore {
     async fn get(&self, id: PlayerId) -> Result<Player, MrRollerError> {
         let row = sqlx::query(
             r#"
-            SELECT id, last_roll_at, luck, coins, xp, is_admin
+            SELECT id, last_roll_at, luck, coins, xp, has_started, tutorial_completed, is_admin
             FROM players
             WHERE id = ?
             "#,
@@ -135,8 +137,8 @@ impl PlayerStore for SqliteStore {
 
         sqlx::query(
             r#"
-            INSERT INTO players (id, last_roll_at, luck, coins, xp, is_admin)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO players (id, last_roll_at, luck, coins, xp, has_started, tutorial_completed, is_admin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(player_id_to_i64(player.id))
@@ -144,6 +146,8 @@ impl PlayerStore for SqliteStore {
         .bind(player.luck as i64)
         .bind(player.coins as i64)
         .bind(player.xp as i64)
+        .bind(if player.has_started { 1_i64 } else { 0_i64 })
+        .bind(if player.tutorial_completed { 1_i64 } else { 0_i64 })
         .bind(if player.is_admin { 1_i64 } else { 0_i64 })
         .execute(&self.pool)
         .await?;
@@ -174,7 +178,7 @@ impl PlayerStore for SqliteStore {
     async fn all(&self) -> Result<Vec<Player>, MrRollerError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, last_roll_at, luck, coins, xp, is_admin
+            SELECT id, last_roll_at, luck, coins, xp, has_started, tutorial_completed, is_admin
             FROM players
             ORDER BY id ASC
             "#,
@@ -189,7 +193,7 @@ impl PlayerStore for SqliteStore {
         let result = sqlx::query(
             r#"
             UPDATE players
-            SET last_roll_at = ?, luck = ?, coins = ?, xp = ?, is_admin = ?
+            SET last_roll_at = ?, luck = ?, coins = ?, xp = ?, has_started = ?, tutorial_completed = ?, is_admin = ?
             WHERE id = ?
             "#,
         )
@@ -197,6 +201,8 @@ impl PlayerStore for SqliteStore {
         .bind(player.luck as i64)
         .bind(player.coins as i64)
         .bind(player.xp as i64)
+        .bind(if player.has_started { 1_i64 } else { 0_i64 })
+        .bind(if player.tutorial_completed { 1_i64 } else { 0_i64 })
         .bind(if player.is_admin { 1_i64 } else { 0_i64 })
         .bind(player_id_to_i64(player.id))
         .execute(&self.pool)

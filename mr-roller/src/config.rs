@@ -23,8 +23,6 @@ pub struct Settings {
 pub struct DiscordConfig {
     pub enabled: bool,
     pub token: Option<String>,
-    pub guild_id: Option<u64>,
-    pub home_channel_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

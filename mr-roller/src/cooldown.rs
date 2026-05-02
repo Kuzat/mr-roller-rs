@@ -28,11 +28,7 @@ impl CooldownConfig {
     /// - the configured `duration` has elapsed since their last roll.
     pub fn is_on_cooldown(&self, last_roll_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
         if self.reset_at_midnight {
-            let today_midnight = now
-                .date_naive()
-                .and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_utc();
+            let today_midnight = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
             if last_roll_at < today_midnight {
                 return false;
             }
@@ -60,7 +56,7 @@ mod tests {
     #[test]
     fn test_midnight_reset_allows_next_day() {
         let config = CooldownConfig::default(); // 24h, midnight
-        // Rolled yesterday at 13:00, now it's 07:00 next day
+                                                // Rolled yesterday at 13:00, now it's 07:00 next day
         assert!(!config.is_on_cooldown(dt(28, 13, 0), dt(29, 7, 0)));
     }
 

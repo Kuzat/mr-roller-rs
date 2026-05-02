@@ -6,11 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     errors::MrRollerError,
-    game::{
-        inventory::ItemId,
-        item::Item,
-        player::PlayerId,
-    },
+    game::{inventory::ItemId, item::Item, player::PlayerId},
 };
 
 /// Trait for inventory persistence.
@@ -23,11 +19,7 @@ pub trait InventoryStore: Send + Sync {
     async fn add_item(&self, player_id: PlayerId, item: Item) -> Result<ItemId, MrRollerError>;
 
     /// Remove a specific item from a player's inventory.
-    async fn remove_item(
-        &self,
-        player_id: PlayerId,
-        item_id: ItemId,
-    ) -> Result<(), MrRollerError>;
+    async fn remove_item(&self, player_id: PlayerId, item_id: ItemId) -> Result<(), MrRollerError>;
 
     /// List all items (with their IDs) in a player's inventory.
     async fn list_items(&self, player_id: PlayerId) -> Result<Vec<(ItemId, Item)>, MrRollerError>;
@@ -68,11 +60,7 @@ impl InventoryStore for InMemoryInventoryStore {
         Ok(id)
     }
 
-    async fn remove_item(
-        &self,
-        player_id: PlayerId,
-        item_id: ItemId,
-    ) -> Result<(), MrRollerError> {
+    async fn remove_item(&self, player_id: PlayerId, item_id: ItemId) -> Result<(), MrRollerError> {
         self.inventories
             .write()
             .await

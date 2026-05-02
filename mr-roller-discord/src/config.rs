@@ -1,11 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use mr_roller::config::Settings;
-use serenity::all::GuildId;
 
 #[derive(Debug, Clone)]
 pub struct DiscordRuntimeConfig {
     pub token: String,
-    pub guild_id: Option<GuildId>,
     pub database_url: String,
 }
 
@@ -27,11 +25,6 @@ impl DiscordRuntimeConfig {
 
         Ok(Self {
             token,
-            guild_id: settings
-                .discord
-                .guild_id
-                .filter(|id| *id != 0)
-                .map(GuildId::new),
             database_url,
         })
     }

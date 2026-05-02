@@ -23,7 +23,6 @@ pub async fn run_bot(
     check_interval_seconds: u64,
 ) -> Result<(), Error> {
     let token = config.token.clone();
-    let guild_id = config.guild_id;
     let scheduler_registry = data.games.clone();
 
     let framework = poise::Framework::builder()
@@ -41,18 +40,8 @@ pub async fn run_bot(
                     Some(ActivityData::playing("Mr Roller 🎲")),
                     OnlineStatus::Online,
                 );
-                if let Some(guild_id) = guild_id {
-                    poise::builtins::register_in_guild(
-                        ctx,
-                        &framework.options().commands,
-                        guild_id,
-                    )
-                    .await?;
-                    info!(guild_id = guild_id.get(), "registered guild slash commands");
-                } else {
-                    poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                    info!("registered global slash commands");
-                }
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                info!("registered global slash commands");
                 spawn_event_scheduler(scheduler_registry, ctx.http.clone(), check_interval_seconds);
                 Ok(data)
             })

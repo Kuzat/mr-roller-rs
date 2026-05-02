@@ -55,21 +55,33 @@ impl Command for StartCommand {
         let is_bootstrap_admin = is_bootstrap_admin(self.player_id, ctx.bootstrap_admin_ids);
 
         if ctx.players.contains(self.player_id).await? {
-            if is_bootstrap_admin {
-                let mut player = ctx.players.get(self.player_id).await?;
-                if !player.is_admin {
-                    player.is_admin = true;
-                    ctx.players.update(player).await?;
-                    return Ok(Response::success(
-                        "You are already in the game and have been promoted to admin.",
-                    ));
-                }
+            let mut player = ctx.players.get(self.player_id).await?;
+            let promoted_to_admin = is_bootstrap_admin && !player.is_admin;
+            if promoted_to_admin {
+                player.is_admin = true;
+            }
+
+            if !player.has_started {
+                player.has_started = true;
+                ctx.players.update(player).await?;
+                ctx.inventory
+                    .add_item(self.player_id, Item::BasicDice(BasicDice::starter_dice()))
+                    .await?;
+                return Ok(Response::success(start_tutorial_message()));
+            }
+
+            if promoted_to_admin {
+                ctx.players.update(player).await?;
+                return Ok(Response::success(
+                    "You are already in the game and have been promoted to admin.",
+                ));
             }
             return Ok(Response::error("You are already in the game."));
         }
 
         let mut player = crate::game::player::Player::new(self.player_id);
         player.is_admin = is_bootstrap_admin;
+        player.has_started = true;
         ctx.players.insert(player).await?;
 
         // Grant starter dice
@@ -77,9 +89,7 @@ impl Command for StartCommand {
             .add_item(self.player_id, Item::BasicDice(BasicDice::starter_dice()))
             .await?;
 
-        Ok(Response::success(
-            "You have been added to the game and given the starter dice.",
-        ))
+        Ok(Response::success(start_tutorial_message()))
     }
 }
 
@@ -122,6 +132,8 @@ impl Command for UseItemCommand {
         let response = item.handle();
 
         // If it was a dice roll, update player roll state and leaderboard.
+        let mut show_tutorial_complete = false;
+        let mut roll_amount = None;
         if response.kind == ResponseKind::DiceRoll {
             player.last_roll_at = Some(now);
 
@@ -129,7 +141,13 @@ impl Command for UseItemCommand {
                 if let Some(roll) = data.get("roll").and_then(|v| v.as_u64()) {
                     player.xp += roll;
                     player.coins += roll;
+                    roll_amount = Some(roll);
                 }
+            }
+
+            show_tutorial_complete = player.has_started && !player.tutorial_completed;
+            if show_tutorial_complete {
+                player.tutorial_completed = true;
             }
 
             ctx.players.update(player.clone()).await?;
@@ -144,8 +162,23 @@ impl Command for UseItemCommand {
                 .await?;
         }
 
+        if show_tutorial_complete && response.kind == ResponseKind::DiceRoll {
+            let mut response = response;
+            if let Some(roll) = roll_amount {
+                response.message = format!(
+                    "{}\n\nYou earned {roll} XP and {roll} gold. XP raises your leaderboard score, and gold can be spent in `/shop` on better dice and useful items. Try `/shop` to see what you can buy, or `/leaderboard` to see the top players.",
+                    response.message
+                );
+            }
+            return Ok(response);
+        }
+
         Ok(response)
     }
+}
+
+fn start_tutorial_message() -> &'static str {
+    "Welcome to Mr Roller! You have been given a starter dice.\n\nUse `/inventory` to see your items, then use `/use` and autocomplete/select your Starter Dice to roll it."
 }
 
 // ── Inventory ──────────────────────────────────────────────────────────────
@@ -893,6 +926,52 @@ mod tests {
 
         assert_eq!(resp.kind, ResponseKind::Success);
         assert!(players.get(PlayerId::new(7)).await.unwrap().is_admin);
+    }
+
+    #[tokio::test]
+    async fn test_start_existing_admin_without_starter_dice_grants_starter_dice() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+        let player_id = PlayerId::new(7);
+        let mut setup_admin = crate::game::player::Player::new(player_id);
+        setup_admin.is_admin = true;
+        players.insert(setup_admin).await.unwrap();
+
+        let resp = StartCommand { player_id }.execute(&ctx).await.unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::Success);
+        assert!(resp.message.contains("starter dice"));
+        let items = inventory.list_items(player_id).await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert!(matches!(&items[0].1, Item::BasicDice(dice) if dice.name == "Starter Dice"));
+        assert!(players.get(player_id).await.unwrap().is_admin);
+    }
+
+    #[tokio::test]
+    async fn test_first_dice_use_completes_tutorial() {
+        let players = InMemoryPlayerStore::new();
+        let inventory = InMemoryInventoryStore::new();
+        let leaderboard = InMemoryLeaderboardStore::new();
+        let cooldown = CooldownConfig::default();
+        let ctx = make_context(&players, &inventory, &leaderboard, &cooldown);
+        let player_id = PlayerId::new(1);
+
+        StartCommand { player_id }.execute(&ctx).await.unwrap();
+        let item_id = inventory.list_items(player_id).await.unwrap()[0].0;
+
+        let resp = UseItemCommand { player_id, item_id }
+            .execute(&ctx)
+            .await
+            .unwrap();
+
+        assert_eq!(resp.kind, ResponseKind::DiceRoll);
+        assert!(resp.message.contains("You earned"));
+        assert!(resp.message.contains("/shop"));
+        assert!(resp.message.contains("/leaderboard"));
+        assert!(players.get(player_id).await.unwrap().tutorial_completed);
     }
 
     #[tokio::test]

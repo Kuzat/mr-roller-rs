@@ -1,0 +1,48 @@
+# Mr Roller Discord multi-tenant configuration.
+#
+# This file is intended for the public/installable Discord bot runtime.
+# Load it with:
+#   MR_ROLLER_CONFIG='./mr-roller-discord.toml' cargo run -p mr-roller-discord
+#
+# Secrets should normally be supplied with environment variables instead of
+# committed to this file:
+#   MR_ROLLER__DISCORD__TOKEN='your-bot-token'
+#
+# The database URL below matches the local PostgreSQL service in compose.yaml.
+
+[admin]
+# Discord user IDs that become in-game admins when they run /start.
+# Example:
+# bootstrap_admin_ids = [123456789012345678]
+bootstrap_admin_ids = []
+
+[database]
+# Matches compose.yaml:
+#   POSTGRES_USER=mr_roller
+#   POSTGRES_PASSWORD=secret
+#   POSTGRES_DB=mr_roller
+url = "postgres://mr_roller:secret@localhost:5432/mr_roller"
+
+[events]
+enabled = true
+check_interval_seconds = 60
+spawn_chance_per_check = 0.004
+max_active_events = 1
+
+[events.random_item_spawn]
+enabled = true
+timeout_seconds = 900
+
+[[events.random_item_spawn.items]]
+kind = "regular_dice"
+weight = 1
+
+[[events.random_item_spawn.items]]
+kind = "reroll_token"
+weight = 5
+
+[discord]
+enabled = true
+# Prefer MR_ROLLER__DISCORD__TOKEN for local/prod secrets.
+token = ""
+

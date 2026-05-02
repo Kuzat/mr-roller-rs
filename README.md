@@ -163,67 +163,26 @@ The Discord process is multi-tenant. A server manager installs the app, runs
 Discord guild + channel. The same Discord server can host separate games in
 separate channels.
 
-Configure it in `mr-roller.toml` or with environment overrides:
-
-```toml
-[database]
-url = "postgres://mr_roller:secret@localhost:5432/mr_roller"
-
-[discord]
-enabled = true
-token = ""       # prefer MR_ROLLER__DISCORD__TOKEN in production
-guild_id = 123    # optional dev guild for instant command updates; omit/0 for global commands
-```
-
-Start the local PostgreSQL dependency:
+Use the Discord-specific config file, which includes the PostgreSQL database URL
+from `compose.yaml`:
 
 ```bash
 docker compose up -d postgres
-```
 
-Run locally:
-
-```bash
+MR_ROLLER_CONFIG='./mr-roller-discord.toml' \
 MR_ROLLER__DISCORD__TOKEN='your-bot-token' \
-MR_ROLLER__DATABASE__URL='postgres://mr_roller:secret@localhost:5432/mr_roller' \
 cargo run -p mr-roller-discord
 ```
 
-The Discord binary requires a PostgreSQL `database.url`. If `discord.guild_id` is
-set, commands are registered to that guild; otherwise they are registered
-globally. SQLite remains available for the core crate, tests, CLI, and local
+See [docs/discord.md](docs/discord.md) for the full setup guide, including
+Discord application setup, bot invite permissions, multi-tenant `/setup`, and
+available commands.
+
+The Discord binary requires a PostgreSQL `database.url`. The multi-tenant config
+registers slash commands globally so the same bot install works across many
+servers. SQLite remains available for the core crate, tests, CLI, and local
 single-process use, but not for the public Discord runtime. Migrations are
 applied automatically when the Discord process starts.
-
-To install the hosted app, create an OAuth2 URL in the Discord Developer Portal
-with scopes `bot` and `applications.commands`. Recommended bot permissions are
-View Channels, Send Messages, Embed Links, Read Message History, and Use Slash
-Commands.
-
-Available Discord commands include:
-
-```text
-/ping
-/setup channel:<text-channel>
-/status
-/start
-/inventory
-/shop
-/buy item:<shop key>
-/leaderboard
-/use item:<inventory item>
-/events
-/event claim event:<event id>
-/event trash event:<event id>
-/admin give user:<Discord user> item:<item>
-/admin coins user:<Discord user> amount:<delta>
-/admin set-admin user:<Discord user> is-admin:<bool>
-/admin event spawn-random-item
-```
-
-Random events are also checked by the Discord process using the shared core
-`EventScheduler`. Spawned events are posted to each configured game channel with
-`Claim` and `Trash` buttons.
 
 ## Database migrations
 

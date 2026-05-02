@@ -19,11 +19,7 @@ pub trait LeaderboardStore: Send + Sync {
     async fn get_scores(&self, limit: usize) -> Result<Vec<(PlayerId, Score)>, MrRollerError>;
 
     /// Updates or inserts a player's score.
-    async fn update_score(
-        &self,
-        player_id: PlayerId,
-        score: Score,
-    ) -> Result<(), MrRollerError>;
+    async fn update_score(&self, player_id: PlayerId, score: Score) -> Result<(), MrRollerError>;
 }
 
 /// In-memory leaderboard store backed by `HashMap` behind a `RwLock`.

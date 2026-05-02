@@ -21,6 +21,10 @@ pub struct Player {
     pub luck: u64,
     pub coins: u64,
     pub xp: u64,
+    /// Whether this player has run `/start` and received onboarding rewards.
+    pub has_started: bool,
+    /// Whether this player has completed the initial `/start` tutorial flow.
+    pub tutorial_completed: bool,
     /// Whether this player may execute admin-only commands.
     pub is_admin: bool,
 }
@@ -33,6 +37,8 @@ impl Player {
             luck: 0,
             coins: 0,
             xp: 0,
+            has_started: false,
+            tutorial_completed: false,
             is_admin: false,
         }
     }
@@ -56,6 +62,8 @@ mod tests {
         assert_eq!(player.coins, 0);
         assert_eq!(player.xp, 0);
         assert!(player.last_roll_at.is_none());
+        assert!(!player.has_started);
+        assert!(!player.tutorial_completed);
         assert!(!player.is_admin);
     }
 }

@@ -48,12 +48,12 @@ pub async fn setup(
 
     let setup_message = if created {
         format!(
-            "Mr Roller is ready in {}.\nYou are now an admin for this game.",
+            "Mr Roller is ready in {}.\nYou are now an admin for this game. Run `/start` in that channel to receive your starter dice.",
             channel.mention()
         )
     } else {
         format!(
-            "A Mr Roller game already exists in {}.\nYou have been added as an admin for that game.",
+            "A Mr Roller game already exists in {}.\nYou have been added as an admin for that game. Run `/start` in that channel to receive your starter dice if you have not already joined.",
             channel.mention()
         )
     };

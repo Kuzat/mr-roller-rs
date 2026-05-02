@@ -64,6 +64,8 @@ fn row_to_player(row: PgRow) -> Result<Player, MrRollerError> {
         luck: i64_to_u64(row.try_get::<i64, _>("luck")?, "luck")?,
         coins: i64_to_u64(row.try_get::<i64, _>("coins")?, "coins")?,
         xp: i64_to_u64(row.try_get::<i64, _>("xp")?, "xp")?,
+        has_started: row.try_get("has_started")?,
+        tutorial_completed: row.try_get("tutorial_completed")?,
         is_admin: row.try_get("is_admin")?,
     })
 }
@@ -82,7 +84,7 @@ impl PlayerStore for PostgresGameStore {
     async fn get(&self, id: PlayerId) -> Result<Player, MrRollerError> {
         let row = sqlx::query(
             r#"
-            SELECT id, last_roll_at, luck, coins, xp, is_admin
+            SELECT id, last_roll_at, luck, coins, xp, has_started, tutorial_completed, is_admin
             FROM players
             WHERE game_id = $1 AND id = $2
             "#,
@@ -103,8 +105,8 @@ impl PlayerStore for PostgresGameStore {
 
         sqlx::query(
             r#"
-            INSERT INTO players (game_id, id, last_roll_at, luck, coins, xp, is_admin)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO players (game_id, id, last_roll_at, luck, coins, xp, has_started, tutorial_completed, is_admin)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             "#,
         )
         .bind(self.game_id)
@@ -113,6 +115,8 @@ impl PlayerStore for PostgresGameStore {
         .bind(u64_to_i64(player.luck, "luck")?)
         .bind(u64_to_i64(player.coins, "coins")?)
         .bind(u64_to_i64(player.xp, "xp")?)
+        .bind(player.has_started)
+        .bind(player.tutorial_completed)
         .bind(player.is_admin)
         .execute(&self.pool)
         .await?;
@@ -145,7 +149,7 @@ impl PlayerStore for PostgresGameStore {
     async fn all(&self) -> Result<Vec<Player>, MrRollerError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, last_roll_at, luck, coins, xp, is_admin
+            SELECT id, last_roll_at, luck, coins, xp, has_started, tutorial_completed, is_admin
             FROM players
             WHERE game_id = $1
             ORDER BY id ASC
@@ -161,7 +165,7 @@ impl PlayerStore for PostgresGameStore {
         let result = sqlx::query(
             r#"
             UPDATE players
-            SET last_roll_at = $3, luck = $4, coins = $5, xp = $6, is_admin = $7
+            SET last_roll_at = $3, luck = $4, coins = $5, xp = $6, has_started = $7, tutorial_completed = $8, is_admin = $9
             WHERE game_id = $1 AND id = $2
             "#,
         )
@@ -171,6 +175,8 @@ impl PlayerStore for PostgresGameStore {
         .bind(u64_to_i64(player.luck, "luck")?)
         .bind(u64_to_i64(player.coins, "coins")?)
         .bind(u64_to_i64(player.xp, "xp")?)
+        .bind(player.has_started)
+        .bind(player.tutorial_completed)
         .bind(player.is_admin)
         .execute(&self.pool)
         .await?;
