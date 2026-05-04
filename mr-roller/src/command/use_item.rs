@@ -1,12 +1,12 @@
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 
 use crate::{
     command::{Command, Context},
     errors::MrRollerError,
-    game::{inventory::ItemId, player::PlayerId},
+    game::{inventory::ItemId, item::Item, player::PlayerId},
     response::{Response, ResponseKind},
-    store::leaderboard::Score,
+    store::{leaderboard::Score, ItemUseRecord},
 };
 
 // ── UseItem ────────────────────────────────────────────────────────────────
@@ -42,7 +42,18 @@ impl Command for UseItemCommand {
             ctx.inventory
                 .remove_item(self.player_id, self.item_id)
                 .await?;
-            return Ok(item.handle());
+            let response = item.handle();
+            record_item_use(
+                ctx,
+                self.player_id,
+                self.item_id,
+                &item,
+                &response,
+                None,
+                now,
+            )
+            .await?;
+            return Ok(response);
         }
 
         let response = item.handle();
@@ -78,6 +89,17 @@ impl Command for UseItemCommand {
                 .await?;
         }
 
+        record_item_use(
+            ctx,
+            self.player_id,
+            self.item_id,
+            &item,
+            &response,
+            roll_amount,
+            now,
+        )
+        .await?;
+
         if show_tutorial_complete && response.kind == ResponseKind::DiceRoll {
             let mut response = response;
             if let Some(roll) = roll_amount {
@@ -90,5 +112,37 @@ impl Command for UseItemCommand {
         }
 
         Ok(response)
+    }
+}
+
+async fn record_item_use(
+    ctx: &Context<'_>,
+    player_id: PlayerId,
+    item_id: ItemId,
+    item: &Item,
+    response: &Response,
+    roll: Option<u64>,
+    used_at: DateTime<Utc>,
+) -> Result<(), MrRollerError> {
+    ctx.item_use_history
+        .record_item_use(ItemUseRecord::new(
+            player_id,
+            item_id,
+            item.name().to_string(),
+            item_kind(item).to_string(),
+            serde_json::to_value(item)?,
+            format!("{:?}", response.kind),
+            roll,
+            used_at,
+        ))
+        .await
+}
+
+fn item_kind(item: &Item) -> &'static str {
+    match item {
+        Item::BasicDice(_) => "basic_dice",
+        Item::LuckyDice(_) => "lucky_dice",
+        Item::CursedDice(_) => "cursed_dice",
+        Item::RerollToken(_) => "reroll_token",
     }
 }

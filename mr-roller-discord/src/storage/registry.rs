@@ -191,7 +191,8 @@ impl DiscordGameRegistry {
             self.pool.clone(),
             discord_game.game_id,
         ));
-        let game = Arc::new(Game::with_event_store(
+        let game = Arc::new(Game::with_event_store_and_history(
+            store.clone(),
             store.clone(),
             store.clone(),
             store.clone(),

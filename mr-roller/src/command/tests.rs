@@ -8,8 +8,9 @@ use crate::{
     },
     response::ResponseKind,
     store::{
-        EventStore, InMemoryEventStore, InMemoryInventoryStore, InMemoryLeaderboardStore,
-        InMemoryPlayerStore, InventoryStore, LeaderboardStore, PlayerStore,
+        EventStore, InMemoryEventStore, InMemoryInventoryStore, InMemoryItemUseHistoryStore,
+        InMemoryLeaderboardStore, InMemoryPlayerStore, InventoryStore, ItemUseHistoryStore,
+        LeaderboardStore, PlayerStore,
     },
 };
 
@@ -24,6 +25,7 @@ fn make_context<'a>(
         inventory,
         leaderboard,
         events: Box::leak(Box::new(InMemoryEventStore::new())),
+        item_use_history: Box::leak(Box::new(InMemoryItemUseHistoryStore::new())),
         cooldown,
         bootstrap_admin_ids: &[],
         event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
@@ -67,6 +69,7 @@ async fn test_start_bootstrap_admin() {
         inventory: &inventory,
         leaderboard: &leaderboard,
         events: Box::leak(Box::new(InMemoryEventStore::new())),
+        item_use_history: Box::leak(Box::new(InMemoryItemUseHistoryStore::new())),
         cooldown: &cooldown,
         bootstrap_admin_ids: &bootstrap_admin_ids,
         event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
@@ -94,6 +97,7 @@ async fn test_start_promotes_existing_bootstrap_admin() {
         inventory: &inventory,
         leaderboard: &leaderboard,
         events: Box::leak(Box::new(InMemoryEventStore::new())),
+        item_use_history: Box::leak(Box::new(InMemoryItemUseHistoryStore::new())),
         cooldown: &cooldown,
         bootstrap_admin_ids: &bootstrap_admin_ids,
         event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
@@ -173,6 +177,7 @@ async fn test_bootstrap_admin_can_use_admin_command_even_before_persisted_flag()
         inventory: &inventory,
         leaderboard: &leaderboard,
         events: Box::leak(Box::new(InMemoryEventStore::new())),
+        item_use_history: Box::leak(Box::new(InMemoryItemUseHistoryStore::new())),
         cooldown: &cooldown,
         bootstrap_admin_ids: &bootstrap_admin_ids,
         event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
@@ -262,6 +267,55 @@ async fn test_use_item_dice_roll() {
     // Leaderboard should have an entry
     let scores = leaderboard.get_scores(10).await.unwrap();
     assert_eq!(scores.len(), 1);
+}
+
+#[tokio::test]
+async fn test_use_item_records_history() {
+    let players = InMemoryPlayerStore::new();
+    let inventory = InMemoryInventoryStore::new();
+    let leaderboard = InMemoryLeaderboardStore::new();
+    let events = InMemoryEventStore::new();
+    let item_use_history = InMemoryItemUseHistoryStore::new();
+    let cooldown = CooldownConfig::default();
+    let ctx = Context {
+        players: &players,
+        inventory: &inventory,
+        leaderboard: &leaderboard,
+        events: &events,
+        item_use_history: &item_use_history,
+        cooldown: &cooldown,
+        bootstrap_admin_ids: &[],
+        event_config: Box::leak(Box::new(crate::config::EventsConfig::default())),
+    };
+
+    StartCommand {
+        player_id: PlayerId::new(1),
+    }
+    .execute(&ctx)
+    .await
+    .unwrap();
+
+    let item_id = inventory
+        .add_item(PlayerId::new(1), Item::BasicDice(BasicDice::regular_dice()))
+        .await
+        .unwrap();
+
+    UseItemCommand {
+        player_id: PlayerId::new(1),
+        item_id,
+    }
+    .execute(&ctx)
+    .await
+    .unwrap();
+
+    let records = item_use_history
+        .list_item_uses(PlayerId::new(1), 10)
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].item_id, item_id);
+    assert_eq!(records[0].item_kind, "basic_dice");
+    assert!(records[0].roll.is_some());
 }
 
 #[tokio::test]
@@ -508,6 +562,7 @@ async fn test_admin_spawn_random_item_event_and_claim() {
         inventory: &inventory,
         leaderboard: &leaderboard,
         events: &events,
+        item_use_history: Box::leak(Box::new(InMemoryItemUseHistoryStore::new())),
         cooldown: &cooldown,
         bootstrap_admin_ids: &[],
         event_config: &event_config,
@@ -566,6 +621,7 @@ async fn test_trash_event_prevents_claim() {
         inventory: &inventory,
         leaderboard: &leaderboard,
         events: &events,
+        item_use_history: Box::leak(Box::new(InMemoryItemUseHistoryStore::new())),
         cooldown: &cooldown,
         bootstrap_admin_ids: &[],
         event_config: &event_config,

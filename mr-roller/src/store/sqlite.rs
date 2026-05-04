@@ -12,7 +12,10 @@ use crate::{
         player::{Player, PlayerId},
     },
     store::{
-        event::EventStore, inventory::InventoryStore, leaderboard::LeaderboardStore,
+        event::EventStore,
+        history::{ItemUseHistoryStore, ItemUseRecord},
+        inventory::InventoryStore,
+        leaderboard::LeaderboardStore,
         player::PlayerStore,
     },
 };
@@ -89,14 +92,14 @@ fn opt_datetime_to_string(dt: Option<DateTime<Utc>>) -> Option<String> {
     dt.map(|d| d.to_rfc3339())
 }
 
+fn string_to_datetime(value: String) -> Result<DateTime<Utc>, MrRollerError> {
+    DateTime::parse_from_rfc3339(&value)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| MrRollerError::Storage(e.to_string()))
+}
+
 fn opt_string_to_datetime(value: Option<String>) -> Result<Option<DateTime<Utc>>, MrRollerError> {
-    value
-        .map(|s| {
-            DateTime::parse_from_rfc3339(&s)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|e| MrRollerError::Storage(e.to_string()))
-        })
-        .transpose()
+    value.map(string_to_datetime).transpose()
 }
 
 fn row_to_player(row: sqlx::sqlite::SqliteRow) -> Result<Player, MrRollerError> {
@@ -292,6 +295,73 @@ impl InventoryStore for SqliteStore {
                     Uuid::parse_str(&id).map_err(|e| MrRollerError::Storage(e.to_string()))?;
                 let item = serde_json::from_str(&item_json)?;
                 Ok((item_id, item))
+            })
+            .collect()
+    }
+}
+
+#[async_trait]
+impl ItemUseHistoryStore for SqliteStore {
+    async fn record_item_use(&self, record: ItemUseRecord) -> Result<(), MrRollerError> {
+        sqlx::query(
+            r#"
+            INSERT INTO item_use_history (id, player_id, item_id, item_name, item_kind, item_json, response_kind, roll, used_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(record.id.to_string())
+        .bind(player_id_to_i64(record.player_id))
+        .bind(record.item_id.to_string())
+        .bind(record.item_name)
+        .bind(record.item_kind)
+        .bind(serde_json::to_string(&record.item_json)?)
+        .bind(record.response_kind)
+        .bind(record.roll.map(|roll| roll as i64))
+        .bind(record.used_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_item_uses(
+        &self,
+        player_id: PlayerId,
+        limit: usize,
+    ) -> Result<Vec<ItemUseRecord>, MrRollerError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, player_id, item_id, item_name, item_kind, item_json, response_kind, roll, used_at
+            FROM item_use_history
+            WHERE player_id = ?
+            ORDER BY used_at DESC, id DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(player_id_to_i64(player_id))
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let id: String = row.try_get("id")?;
+                let item_id: String = row.try_get("item_id")?;
+                let item_json: String = row.try_get("item_json")?;
+                let used_at: String = row.try_get("used_at")?;
+                Ok(ItemUseRecord {
+                    id: Uuid::parse_str(&id).map_err(|e| MrRollerError::Storage(e.to_string()))?,
+                    player_id: i64_to_player_id(row.try_get::<i64, _>("player_id")?),
+                    item_id: Uuid::parse_str(&item_id)
+                        .map_err(|e| MrRollerError::Storage(e.to_string()))?,
+                    item_name: row.try_get("item_name")?,
+                    item_kind: row.try_get("item_kind")?,
+                    item_json: serde_json::from_str(&item_json)?,
+                    response_kind: row.try_get("response_kind")?,
+                    roll: row
+                        .try_get::<Option<i64>, _>("roll")?
+                        .map(|roll| roll as u64),
+                    used_at: string_to_datetime(used_at)?,
+                })
             })
             .collect()
     }
@@ -507,6 +577,35 @@ mod tests {
         store.remove_item(pid, token_id).await.unwrap();
         let items = store.list_items(pid).await.unwrap();
         assert_eq!(items.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_item_use_history_record_and_list() {
+        let store = store().await;
+        let pid = PlayerId::new(1);
+        store.insert(Player::new(pid)).await.unwrap();
+        let item_id = Uuid::new_v4();
+
+        store
+            .record_item_use(ItemUseRecord::new(
+                pid,
+                item_id,
+                "Regular Dice".to_string(),
+                "basic_dice".to_string(),
+                serde_json::json!({"BasicDice": {"name": "Regular Dice"}}),
+                "DiceRoll".to_string(),
+                Some(4),
+                Utc::now(),
+            ))
+            .await
+            .unwrap();
+
+        let records = store.list_item_uses(pid, 10).await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].player_id, pid);
+        assert_eq!(records[0].item_id, item_id);
+        assert_eq!(records[0].item_kind, "basic_dice");
+        assert_eq!(records[0].roll, Some(4));
     }
 
     #[tokio::test]

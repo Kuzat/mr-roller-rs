@@ -11,7 +11,10 @@ use crate::{
     cooldown::CooldownConfig,
     game::player::PlayerId,
     response::{Response, ResponseKind},
-    store::{EventStore, InMemoryEventStore, InventoryStore, LeaderboardStore, PlayerStore},
+    store::{
+        EventStore, InMemoryEventStore, InMemoryItemUseHistoryStore, InventoryStore,
+        ItemUseHistoryStore, LeaderboardStore, PlayerStore,
+    },
 };
 
 /// Top-level game dispatcher. Frontends (CLI, Discord) only interact with
@@ -21,6 +24,7 @@ pub struct Game {
     inventory: Arc<dyn InventoryStore>,
     leaderboard: Arc<dyn LeaderboardStore>,
     events: Arc<dyn EventStore>,
+    item_use_history: Arc<dyn ItemUseHistoryStore>,
     cooldown: CooldownConfig,
     bootstrap_admin_ids: Vec<PlayerId>,
     event_config: EventsConfig,
@@ -49,6 +53,7 @@ impl Game {
             inventory,
             leaderboard,
             events: Arc::new(InMemoryEventStore::new()),
+            item_use_history: Arc::new(InMemoryItemUseHistoryStore::new()),
             cooldown,
             bootstrap_admin_ids: Vec::new(),
             event_config: EventsConfig::default(),
@@ -80,6 +85,28 @@ impl Game {
             inventory,
             leaderboard,
             events,
+            item_use_history: Arc::new(InMemoryItemUseHistoryStore::new()),
+            cooldown: CooldownConfig::default(),
+            bootstrap_admin_ids,
+            event_config,
+        }
+    }
+
+    pub fn with_event_store_and_history(
+        players: Arc<dyn PlayerStore>,
+        inventory: Arc<dyn InventoryStore>,
+        leaderboard: Arc<dyn LeaderboardStore>,
+        events: Arc<dyn EventStore>,
+        item_use_history: Arc<dyn ItemUseHistoryStore>,
+        bootstrap_admin_ids: Vec<PlayerId>,
+        event_config: EventsConfig,
+    ) -> Self {
+        Game {
+            players,
+            inventory,
+            leaderboard,
+            events,
+            item_use_history,
             cooldown: CooldownConfig::default(),
             bootstrap_admin_ids,
             event_config,
@@ -95,6 +122,7 @@ impl Game {
             inventory: self.inventory.as_ref(),
             leaderboard: self.leaderboard.as_ref(),
             events: self.events.as_ref(),
+            item_use_history: self.item_use_history.as_ref(),
             cooldown: &self.cooldown,
             bootstrap_admin_ids: &self.bootstrap_admin_ids,
             event_config: &self.event_config,

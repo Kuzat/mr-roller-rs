@@ -6,7 +6,7 @@ use crate::{
     errors::MrRollerError,
     game::player::PlayerId,
     response::Response,
-    store::{EventStore, InventoryStore, LeaderboardStore, PlayerStore},
+    store::{EventStore, InventoryStore, ItemUseHistoryStore, LeaderboardStore, PlayerStore},
 };
 
 mod admin;
@@ -38,6 +38,7 @@ pub struct Context<'a> {
     pub inventory: &'a dyn InventoryStore,
     pub leaderboard: &'a dyn LeaderboardStore,
     pub events: &'a dyn EventStore,
+    pub item_use_history: &'a dyn ItemUseHistoryStore,
     pub cooldown: &'a CooldownConfig,
     pub bootstrap_admin_ids: &'a [PlayerId],
     pub event_config: &'a EventsConfig,

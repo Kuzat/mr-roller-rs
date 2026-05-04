@@ -111,7 +111,8 @@ async fn build_game(settings: &Settings) -> Game {
             Ok(store) => {
                 println!("Using SQLite store: {}", database_url);
                 let store = Arc::new(store);
-                return Game::with_event_store(
+                return Game::with_event_store_and_history(
+                    store.clone(),
                     store.clone(),
                     store.clone(),
                     store.clone(),

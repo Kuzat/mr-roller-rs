@@ -10,6 +10,7 @@ use mr_roller::{
     },
     store::{
         event::EventStore,
+        history::{ItemUseHistoryStore, ItemUseRecord},
         inventory::InventoryStore,
         leaderboard::{LeaderboardStore, Score},
         player::PlayerStore,
@@ -312,6 +313,71 @@ impl LeaderboardStore for PostgresGameStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+}
+
+#[async_trait]
+impl ItemUseHistoryStore for PostgresGameStore {
+    async fn record_item_use(&self, record: ItemUseRecord) -> Result<(), MrRollerError> {
+        sqlx::query(
+            r#"
+            INSERT INTO item_use_history (game_id, id, player_id, item_id, item_name, item_kind, item_json, response_kind, roll, used_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            "#,
+        )
+        .bind(self.game_id)
+        .bind(record.id)
+        .bind(player_id_to_text(record.player_id))
+        .bind(record.item_id)
+        .bind(record.item_name)
+        .bind(record.item_kind)
+        .bind(record.item_json)
+        .bind(record.response_kind)
+        .bind(record.roll.map(|roll| u64_to_i64(roll, "roll")).transpose()?)
+        .bind(record.used_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_item_uses(
+        &self,
+        player_id: PlayerId,
+        limit: usize,
+    ) -> Result<Vec<ItemUseRecord>, MrRollerError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, player_id, item_id, item_name, item_kind, item_json, response_kind, roll, used_at
+            FROM item_use_history
+            WHERE game_id = $1 AND player_id = $2
+            ORDER BY used_at DESC, id DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(self.game_id)
+        .bind(player_id_to_text(player_id))
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ItemUseRecord {
+                    id: row.try_get("id")?,
+                    player_id: text_to_player_id(row.try_get::<String, _>("player_id")?)?,
+                    item_id: row.try_get("item_id")?,
+                    item_name: row.try_get("item_name")?,
+                    item_kind: row.try_get("item_kind")?,
+                    item_json: row.try_get("item_json")?,
+                    response_kind: row.try_get("response_kind")?,
+                    roll: row
+                        .try_get::<Option<i64>, _>("roll")?
+                        .map(|roll| i64_to_u64(roll, "roll"))
+                        .transpose()?,
+                    used_at: row.try_get("used_at")?,
+                })
+            })
+            .collect()
     }
 }
 
